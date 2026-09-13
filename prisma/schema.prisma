@@ -1,0 +1,549 @@
+// SIH 26043 — Civic Problem-to-Impact Platform
+// Full relational schema (PostgreSQL)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── USERS & ROLES ────────────────────────────────────────────────────────────
+// Role values: CITIZEN | GOVERNMENT | UNIVERSITY | FACULTY | INDUSTRY | ADMIN
+// AccountStatus: PENDING | APPROVED | SUSPENDED
+
+model User {
+  id            String   @id @default(cuid())
+  name          String
+  email         String   @unique
+  password      String
+  role          String   // CITIZEN | GOVERNMENT | UNIVERSITY | FACULTY | INDUSTRY | ADMIN
+  accountStatus String   @default("APPROVED") // PENDING | APPROVED | SUSPENDED
+  themePreference String @default("light")    // light | dark
+  avatar        String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  citizen    CitizenProfile?
+  government GovernmentProfile?
+  university UniversityProfile?
+  faculty    FacultyProfile?
+  industry   IndustryProfile?
+
+  problems                Problem[]
+  auditLogs               AuditLog[]
+  notifications           Notification[]
+  assignedTasks           Task[]
+  uploadedDocuments       Document[]
+  governmentActions       ProblemVerification[]
+  validations             GovernmentValidation[]
+  industryCollaborations  IndustryCollaboration[]
+  teamMemberships         TeamMember[]
+  facultyAssignments      FacultyLeaderAssignment[]
+  managedProjects         UniversityProject[]        @relation("UniversityManager")
+  memberships             OrganizationMembership[]
+  communityConfirmations  CommunityConfirmation[]
+  rubricEvaluations       RubricEvaluation[]
+  pilotCheckpoints        PilotCheckpoint[]
+}
+
+model Organization {
+  id         String   @id @default(cuid())
+  name       String
+  code       String?  @unique
+  type       String   // MUNICIPALITY | PANCHAYAT | UNIVERSITY | INDUSTRY_PARTNER | PLATFORM_ADMIN
+  state      String?
+  district   String?
+  department String?  // e.g. "Public Works Department", "Water & Sanitation"
+  status     String   @default("APPROVED") // PENDING | APPROVED | SUSPENDED
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  members  OrganizationMembership[]
+  problems Problem[]
+}
+
+model OrganizationMembership {
+  id          String   @id @default(cuid())
+  userId      String
+  orgId       String
+  role        String   @default("MEMBER") // ADMIN | OFFICER | MEMBER | HEAD
+  designation String?
+  status      String   @default("APPROVED") // PENDING | APPROVED | SUSPENDED
+  isPrimary   Boolean  @default(true)
+  joinedAt    DateTime @default(now())
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, orgId])
+}
+
+model CitizenProfile {
+  id      String  @id @default(cuid())
+  userId  String  @unique
+  phone   String?
+  address String?
+  city    String?
+  state   String?
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model GovernmentProfile {
+  id           String  @id @default(cuid())
+  userId       String  @unique
+  authority    String
+  department   String? // PWD | WATER_SANITATION | ELECTRICITY | URBAN_DEV | HEALTH | ROADS_TRANSPORT
+  jurisdiction String?
+  designation  String?
+  user         User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model UniversityProfile {
+  id          String  @id @default(cuid())
+  userId      String  @unique
+  university  String
+  department  String?
+  designation String?
+  user        User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model FacultyProfile {
+  id          String  @id @default(cuid())
+  userId      String  @unique
+  university  String
+  department  String
+  expertise   String?
+  designation String?
+  user        User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model IndustryProfile {
+  id      String  @id @default(cuid())
+  userId  String  @unique
+  company String
+  sector  String?
+  website String?
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ─── PROBLEM ──────────────────────────────────────────────────────────────────
+// ProblemStatus values: SUBMITTED | UNDER_VERIFICATION | ADDITIONAL_INFO_REQUIRED |
+//   VERIFIED | REJECTED_BY_GOVT | UNDER_UNIVERSITY_REVIEW | REJECTED_BY_UNIVERSITY |
+//   ACCEPTED | TEAM_FORMATION | SOLUTION_DEVELOPMENT | SOLUTION_SUBMITTED |
+//   GOVERNMENT_VALIDATION | APPROVED | INDUSTRY_COLLABORATION | IMPLEMENTATION |
+//   PROBLEM_SOLVED | IMPACT_MEASUREMENT | SUSTAINABLE_IMPACT
+
+model Problem {
+  id                 String   @id @default(cuid())
+  referenceId        String   @unique // PRB-2026-XXXXX
+  citizenId          String
+  orgId              String?
+  title              String
+  description        String
+  category           String   // ProblemCategory
+  location           String
+  municipality       String?
+  panchayat          String?
+  district           String?
+  state              String
+  affectedPopulation Int?
+  status             String   @default("SUBMITTED") // ProblemStatus
+  aiCategory         String?
+  aiSeverity         String?
+  aiRecommendedDepts String?  // JSON array
+  aiSuggestions      String?  // JSON array of actionable suggestions
+  isEmergency        Boolean  @default(false)
+  emergencyReason    String?
+  latitude           Float?
+  longitude          Float?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  citizen                User                    @relation(fields: [citizenId], references: [id])
+  organization           Organization?           @relation(fields: [orgId], references: [id])
+  evidence               ProblemEvidence[]
+  verification           ProblemVerification?
+  project                UniversityProject?
+  auditLogs              AuditLog[]
+  notifications          Notification[]
+  communityConfirmations CommunityConfirmation[]
+}
+
+model CommunityConfirmation {
+  id        String   @id @default(cuid())
+  problemId String
+  citizenId String
+  comment   String?
+  createdAt DateTime @default(now())
+
+  problem Problem @relation(fields: [problemId], references: [id], onDelete: Cascade)
+  citizen User    @relation(fields: [citizenId], references: [id], onDelete: Cascade)
+
+  @@unique([problemId, citizenId])
+}
+
+model ProblemEvidence {
+  id        String   @id @default(cuid())
+  problemId String
+  fileUrl   String
+  fileType  String   // image, video, document
+  fileName  String
+  createdAt DateTime @default(now())
+
+  problem Problem @relation(fields: [problemId], references: [id], onDelete: Cascade)
+}
+
+model ProblemVerification {
+  id                     String    @id @default(cuid())
+  problemId              String    @unique
+  govOfficerId           String
+  status                 String    // PENDING | VERIFIED | REJECTED | ADDITIONAL_INFO_REQUIRED
+  remarks                String?
+  municipalityInput      String?
+  verificationDocs       String?   // JSON array of file URLs
+  siteVisited            Boolean   @default(false)
+  evidenceReviewed       Boolean   @default(false)
+  populationValidated    Boolean   @default(false)
+  localBodyConsulted     Boolean   @default(false)
+  concurrenceOfficial    String?
+  concurrenceDesignation String?
+  concurrenceDate        DateTime?
+  concurrenceNotes       String?
+  recommendedDept        String?
+  priorityScore          Float?
+  slaDueDate             DateTime?
+  verifiedAt             DateTime?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  problem    Problem @relation(fields: [problemId], references: [id])
+  govOfficer User    @relation(fields: [govOfficerId], references: [id])
+}
+
+// ─── UNIVERSITY PROJECT ────────────────────────────────────────────────────────
+// ProjectStatus: PENDING_REVIEW | ACCEPTED | REJECTED | TEAM_FORMATION |
+//   IN_PROGRESS | SOLUTION_SUBMITTED | GOVERNMENT_REVIEW | CHANGES_REQUESTED |
+//   GOVERNMENT_APPROVED | INDUSTRY_COLLABORATION | IMPLEMENTATION |
+//   COMPLETED | IMPACT_MEASURED
+
+model UniversityProject {
+  id              String   @id @default(cuid())
+  problemId       String   @unique
+  universityId    String
+  title           String
+  description     String?
+  status          String   @default("PENDING_REVIEW") // ProjectStatus
+  rejectionReason String?
+  challengeBrief  String?  // Context, constraints, required disciplines, SLA
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  problem           Problem                  @relation(fields: [problemId], references: [id])
+  university        User                     @relation("UniversityManager", fields: [universityId], references: [id])
+  team              UniversityTeam?
+  facultyAssignment FacultyLeaderAssignment?
+  tasks             Task[]
+  milestones        Milestone[]
+  documents         Document[]
+  solution          Solution?
+  validation        GovernmentValidation?
+  collaborations    IndustryCollaboration[]
+  implementation    Implementation?
+  impactMetrics     ImpactMetric[]
+  checkpoints       PilotCheckpoint[]
+}
+
+// ─── UNIVERSITY TEAM ──────────────────────────────────────────────────────────
+
+model UniversityTeam {
+  id          String   @id @default(cuid())
+  projectId   String   @unique
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  project UniversityProject @relation(fields: [projectId], references: [id])
+  members TeamMember[]
+}
+
+model TeamMember {
+  id               String   @id @default(cuid())
+  teamId           String
+  userId           String
+  role             String   // e.g. "Team Lead", "Researcher", "Developer"
+  discipline       String   // e.g. "Civil Engineering", "Computer Science"
+  department       String?
+  responsibilities String?
+  joinedAt         DateTime @default(now())
+
+  team UniversityTeam @relation(fields: [teamId], references: [id])
+  user User           @relation(fields: [userId], references: [id])
+}
+
+model FacultyLeaderAssignment {
+  id         String   @id @default(cuid())
+  projectId  String   @unique
+  facultyId  String
+  assignedAt DateTime @default(now())
+
+  project UniversityProject @relation(fields: [projectId], references: [id])
+  faculty User              @relation(fields: [facultyId], references: [id])
+}
+
+// ─── TASKS & MILESTONES ───────────────────────────────────────────────────────
+// TaskStatus: TODO | IN_PROGRESS | REVIEW | COMPLETED
+
+model Task {
+  id          String    @id @default(cuid())
+  projectId   String
+  title       String
+  description String?
+  assigneeId  String?
+  status      String    @default("TODO") // TaskStatus
+  priority    String    @default("MEDIUM") // LOW | MEDIUM | HIGH
+  dueDate     DateTime?
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  project  UniversityProject @relation(fields: [projectId], references: [id])
+  assignee User?             @relation(fields: [assigneeId], references: [id])
+}
+
+model Milestone {
+  id          String    @id @default(cuid())
+  projectId   String
+  title       String
+  description String?
+  dueDate     DateTime?
+  completedAt DateTime?
+  order       Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  project UniversityProject @relation(fields: [projectId], references: [id])
+}
+
+model Document {
+  id           String   @id @default(cuid())
+  projectId    String
+  title        String
+  fileUrl      String
+  fileName     String
+  fileType     String
+  documentType String   // research | report | design | prototype | government_feedback | industry
+  uploadedById String
+  createdAt    DateTime @default(now())
+
+  project    UniversityProject @relation(fields: [projectId], references: [id])
+  uploadedBy User              @relation(fields: [uploadedById], references: [id])
+}
+
+// ─── SOLUTION ─────────────────────────────────────────────────────────────────
+// SolutionStatus: DRAFT | FACULTY_REVIEW | SUBMITTED | CHANGES_REQUESTED |
+//   GOVERNMENT_APPROVED | GOVERNMENT_REJECTED
+
+model Solution {
+  id                     String    @id @default(cuid())
+  projectId              String    @unique
+  version                Int       @default(1)
+  problemStatement       String
+  rootCause              String
+  alternativesConsidered String?
+  proposedSolution       String
+  technicalApproach      String
+  expectedImpact         String
+  estimatedCost          Float?
+  requiredResources      String?
+  timeline               String?
+  risksAndMitigations    String?
+  environmentalSocial    String?
+  implementationPlan     String
+  sustainabilityPlan     String
+  prototypeUrl           String?
+  status                 String    @default("DRAFT") // SolutionStatus
+  facultyApproved        Boolean   @default(false)
+  facultyApprovedAt      DateTime?
+  facultyRemarks         String?
+  submittedAt            DateTime?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  project           UniversityProject    @relation(fields: [projectId], references: [id])
+  validation        GovernmentValidation?
+  rubricEvaluations RubricEvaluation[]
+}
+
+model GovernmentValidation {
+  id           String    @id @default(cuid())
+  solutionId   String    @unique
+  projectId    String    @unique
+  govOfficerId String
+  status       String    // APPROVE | REQUEST_CHANGES | REJECT
+  feedback     String?
+  decidedAt    DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  solution   Solution          @relation(fields: [solutionId], references: [id])
+  project    UniversityProject @relation(fields: [projectId], references: [id])
+  govOfficer User              @relation(fields: [govOfficerId], references: [id])
+}
+
+model RubricEvaluation {
+  id                 String   @id @default(cuid())
+  solutionId         String
+  evaluatorId        String
+  feasibilityScore   Int      @default(3) // 1-5
+  safetyScore        Int      @default(3) // 1-5
+  costReasonableScore Int     @default(3) // 1-5
+  publicBenefitScore Int      @default(3) // 1-5
+  scalabilityScore   Int      @default(3) // 1-5
+  sustainabilityScore Int     @default(3) // 1-5
+  totalScore         Float    @default(18.0)
+  verdict            String   // APPROVED_FOR_PILOT | APPROVED_WITH_CONDITIONS | CHANGES_REQUESTED | REJECTED
+  feedback           String?
+  createdAt          DateTime @default(now())
+
+  solution  Solution @relation(fields: [solutionId], references: [id], onDelete: Cascade)
+  evaluator User     @relation(fields: [evaluatorId], references: [id])
+}
+
+// ─── INDUSTRY COLLABORATION ───────────────────────────────────────────────────
+// CollaborationType: TECHNICAL_SUPPORT | FUNDING | PRACTICAL_SUPPORT | IMPLEMENTATION_PARTNERSHIP
+// CollaborationStatus: INTERESTED | UNDER_REVIEW | CONFIRMED | ACTIVE | COMPLETED | WITHDRAWN
+
+model IndustryCollaboration {
+  id                String    @id @default(cuid())
+  projectId         String
+  industryPartnerId String
+  collaborationType String    // CollaborationType
+  description       String?
+  status            String    @default("INTERESTED") // CollaborationStatus
+  confirmedAt       DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  project         UniversityProject      @relation(fields: [projectId], references: [id])
+  industryPartner User                   @relation(fields: [industryPartnerId], references: [id])
+  funding         FundingRecord?
+  resources       ResourceContribution[]
+}
+
+model FundingRecord {
+  id              String   @id @default(cuid())
+  collaborationId String   @unique
+  amountRequested Float?
+  amountCommitted Float?
+  amountReceived  Float?   @default(0)
+  purpose         String?
+  budget          String?  // JSON breakdown
+  utilization     String?
+  currency        String   @default("INR")
+  updatedAt       DateTime @updatedAt
+  createdAt       DateTime @default(now())
+
+  collaboration IndustryCollaboration @relation(fields: [collaborationId], references: [id])
+}
+
+model ResourceContribution {
+  id              String    @id @default(cuid())
+  collaborationId String
+  resourceType    String    // equipment | software | infrastructure | expertise | mentor | internship
+  description     String
+  estimatedValue  Float?
+  deliveredAt     DateTime?
+  createdAt       DateTime  @default(now())
+
+  collaboration IndustryCollaboration @relation(fields: [collaborationId], references: [id])
+}
+
+// ─── IMPLEMENTATION ───────────────────────────────────────────────────────────
+// ImplementationStatus: PLANNING | DEVELOPMENT | PILOT | DEPLOYMENT | OPERATIONAL
+
+model Implementation {
+  id                    String    @id @default(cuid())
+  projectId             String    @unique
+  deploymentLocation    String?
+  startDate             DateTime?
+  deploymentDate        DateTime?
+  implementationPartner String?
+  resourcesUsed         String?
+  budget                Float?
+  status                String    @default("PLANNING") // ImplementationStatus
+  deploymentStatus      String?
+  problemsEncountered   String?
+  govUpdates            String?
+  handoverNotes         String?
+  maintenanceSchedule   String?
+  replicatedFromId      String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  project UniversityProject @relation(fields: [projectId], references: [id])
+}
+
+model PilotCheckpoint {
+  id            String   @id @default(cuid())
+  projectId     String
+  checkpointDay Int      // 30 | 90 | 180
+  citizenId     String?
+  status        String   // CONFIRMED_IMPROVED | NOT_IMPROVED | NEEDS_FOLLOW_UP
+  feedback      String?
+  createdAt     DateTime @default(now())
+
+  project UniversityProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  citizen User?             @relation(fields: [citizenId], references: [id])
+}
+
+// ─── IMPACT ───────────────────────────────────────────────────────────────────
+
+model ImpactMetric {
+  id          String   @id @default(cuid())
+  projectId   String
+  metric      String   // e.g. "People Benefited", "Flood Incidents Reduced"
+  value       Float
+  unit        String   // e.g. "persons", "%", "INR"
+  description String?
+  measuredAt  DateTime
+  createdAt   DateTime @default(now())
+
+  project UniversityProject @relation(fields: [projectId], references: [id])
+}
+
+// ─── AUDIT & NOTIFICATIONS ───────────────────────────────────────────────────
+
+model AuditLog {
+  id             String   @id @default(cuid())
+  problemId      String?
+  projectId      String?
+  userId         String
+  action         String
+  previousStatus String?
+  newStatus      String?
+  remarks        String?
+  documentUrl    String?
+  createdAt      DateTime @default(now())
+
+  problem Problem? @relation(fields: [problemId], references: [id])
+  user    User     @relation(fields: [userId], references: [id])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  problemId String?
+  title     String
+  message   String
+  type      String   @default("INFO") // INFO | ACTION | ALERT
+  read      Boolean  @default(false)
+  link      String?
+  createdAt DateTime @default(now())
+
+  user    User     @relation(fields: [userId], references: [id])
+  problem Problem? @relation(fields: [problemId], references: [id])
+}
