@@ -7,7 +7,7 @@ import { DashboardShell } from '@/components/layout/Sidebar'
 import { StatusBadge } from '@/components/workflow/StatusBadge'
 import {
   MapPin, Users, ChevronRight, CheckSquare, Clock,
-  TrendingUp, Shield, AlertCircle, Building2, Target, Filter
+  TrendingUp, Shield, AlertCircle, Building2, Target, MapPinned
 } from 'lucide-react'
 import { format } from 'date-fns'
 import { AIInsightsCard } from '@/components/ai/AIInsightsCard'
@@ -16,19 +16,25 @@ export default function GovernmentDashboard() {
   const { data: session } = useSession()
   const [problems, setProblems] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
-  const [deptFilter, setDeptFilter] = useState<'MY_DEPT' | 'ALL'>('MY_DEPT')
+  const [scope, setScope] = useState<'dept' | 'all'>('dept')
 
   const officerDept = session?.user?.department || 'Urban Development'
+  const officerJurisdiction = session?.user?.jurisdiction
+  const officerAuthority = session?.user?.authority
+  const officerDesignation = session?.user?.designation
 
   useEffect(() => {
-    fetch('/api/problems')
+    setLoading(true)
+    const url = scope === 'all' ? '/api/problems?scope=all' : '/api/problems'
+    fetch(url)
       .then((r) => r.json())
       .then((d) => {
         setProblems(Array.isArray(d) ? d : [])
         setLoading(false)
       })
       .catch(() => setLoading(false))
-  }, [])
+  }, [scope])
+
 
   // Check if problem matches officer's department
   const isDeptMatch = (p: any) => {
@@ -53,15 +59,10 @@ export default function GovernmentDashboard() {
     return pRecDept.includes(dept) || pMunicipality.includes(dept)
   }
 
-  // Sort: Department matching problems first, then by priority/recency
-  const sortedProblems = [...problems].sort((a, b) => {
-    const aMatch = isDeptMatch(a) ? 1 : 0
-    const bMatch = isDeptMatch(b) ? 1 : 0
-    if (bMatch !== aMatch) return bMatch - aMatch
-    return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-  })
-
-  const displayedProblems = deptFilter === 'MY_DEPT' ? sortedProblems.filter(isDeptMatch) : sortedProblems
+  // Server already filters by dept when scope='dept'. Client just sorts by recency.
+  const displayedProblems = [...problems].sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  )
 
   const pendingVerification = problems.filter((p) =>
     ['SUBMITTED', 'UNDER_VERIFICATION', 'ADDITIONAL_INFO_REQUIRED'].includes(p.status)
@@ -74,48 +75,56 @@ export default function GovernmentDashboard() {
     ['IMPLEMENTATION', 'PROBLEM_SOLVED', 'SUSTAINABLE_IMPACT'].includes(p.status)
   )
 
-  const myDeptCount = problems.filter(isDeptMatch).length
-
   return (
     <DashboardShell>
       <div className="page-content space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <div className="flex items-center gap-2 text-xs text-slate-500 mb-1">
-              <span className="text-slate-700 font-medium">Government Administration</span>
-              <span>•</span>
-              <span className="inline-flex items-center gap-1 font-semibold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded">
+            <div className="flex items-center gap-2 flex-wrap text-xs text-slate-500 mb-1">
+              <span className="inline-flex items-center gap-1 font-semibold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded">
                 <Building2 className="w-3 h-3" />
                 {officerDept}
               </span>
+              {officerAuthority && (
+                <span className="text-slate-600">{officerAuthority}</span>
+              )}
+              {officerJurisdiction && (
+                <span className="inline-flex items-center gap-1 text-slate-500">
+                  <MapPinned className="w-3 h-3" />
+                  {officerJurisdiction}
+                </span>
+              )}
+              {officerDesignation && (
+                <span className="text-slate-500 italic">{officerDesignation}</span>
+              )}
             </div>
             <h1 className="text-2xl font-bold text-slate-900">Government Triage & Operations</h1>
             <p className="text-sm text-slate-500 mt-0.5">
-              Verified problem triage, municipal concurrence, and solution validation for your jurisdiction.
+              Problems matched to your department are shown by default. Switch to All to see platform-wide.
             </p>
           </div>
 
           <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200 text-xs font-medium self-start sm:self-auto">
             <button
-              onClick={() => setDeptFilter('MY_DEPT')}
+              onClick={() => setScope('dept')}
               className={`px-3 py-1.5 rounded-md flex items-center gap-1.5 transition-all ${
-                deptFilter === 'MY_DEPT'
+                scope === 'dept'
                   ? 'bg-white text-indigo-700 shadow-sm'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
               <Target className="w-3.5 h-3.5 text-indigo-600" />
-              <span>My Department ({myDeptCount})</span>
+              <span>My Department ({problems.length})</span>
             </button>
             <button
-              onClick={() => setDeptFilter('ALL')}
+              onClick={() => setScope('all')}
               className={`px-3 py-1.5 rounded-md transition-all ${
-                deptFilter === 'ALL'
+                scope === 'all'
                   ? 'bg-white text-slate-900 shadow-sm'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              All Jurisdictions ({problems.length})
+              All Platform
             </button>
           </div>
         </div>
@@ -169,9 +178,9 @@ export default function GovernmentDashboard() {
             <h2 className="text-base font-semibold text-slate-900 flex items-center gap-2">
               <Target className="w-4 h-4 text-indigo-600" />
               <span>
-                {deptFilter === 'MY_DEPT'
-                  ? `Problems Assigned to ${officerDept}`
-                  : 'All Civic Problems across Municipalities'}
+                {scope === 'dept'
+                  ? `Problems for ${officerDept}`
+                  : 'All Civic Problems — Platform-wide'}
               </span>
             </h2>
             <span className="text-xs text-slate-500">{displayedProblems.length} cases</span>
@@ -186,38 +195,26 @@ export default function GovernmentDashboard() {
               <div className="card p-8 text-center">
                 <Target className="w-8 h-8 text-slate-300 mx-auto mb-2" />
                 <p className="text-slate-600 font-medium text-sm">
-                  No issues currently flagged for {officerDept}
+                  No issues currently matched for {officerDept}
                 </p>
                 <button
-                  onClick={() => setDeptFilter('ALL')}
+                  onClick={() => setScope('all')}
                   className="mt-2 text-xs text-indigo-600 hover:underline"
                 >
-                  Switch to All Jurisdictions
+                  Switch to All Platform
                 </button>
               </div>
             ) : (
-              displayedProblems.map((p) => {
-                const match = isDeptMatch(p)
-                return (
+              displayedProblems.map((p) => (
                   <Link
                     key={p.id}
                     href={`/problems/${p.id}`}
-                    className={`card p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-all duration-150 hover:shadow-sm ${
-                      match ? 'border-indigo-300 bg-indigo-50/20 hover:border-indigo-400' : 'hover:border-slate-300'
-                    }`}
+                    className="card p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-all duration-150 hover:shadow-sm hover:border-indigo-300"
                   >
                     <div className="flex-1 min-w-0">
                       <div className="flex flex-wrap items-center gap-2 mb-1">
                         <span className="text-xs font-mono font-medium text-slate-500">{p.referenceId}</span>
                         <StatusBadge status={p.status} />
-
-                        {match && (
-                          <span className="text-[11px] font-semibold text-indigo-700 bg-indigo-100 px-2 py-0.5 rounded flex items-center gap-1">
-                            <Target className="w-3 h-3" />
-                            My Department Match
-                          </span>
-                        )}
-
                         {p.confirmationCount > 0 && (
                           <span className="text-[11px] font-medium text-slate-600 bg-slate-100 px-2 py-0.5 rounded">
                             {p.confirmationCount} citizens affected
@@ -251,8 +248,7 @@ export default function GovernmentDashboard() {
                       <ChevronRight className="w-4 h-4 text-slate-400" />
                     </div>
                   </Link>
-                )
-              })
+                ))
             )}
           </div>
         </div>

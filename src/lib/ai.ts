@@ -369,3 +369,66 @@ Write a professional impact report (150-200 words) covering: the intervention, m
     return null
   }
 }
+
+export async function generateWelcomeInsight(opts: {
+  role: string
+  name: string
+  department?: string
+  discipline?: string
+  sector?: string
+  company?: string
+  university?: string
+  problems: Array<{ status: string; category: string; title: string }>
+}): Promise<{
+  greeting: string
+  insight: string
+  priority?: string
+  type: 'info' | 'success' | 'warning' | 'urgent'
+} | null> {
+  if (!opts.problems.length) return null
+  try {
+    const model = genAI.getGenerativeModel({ model: AI_MODEL })
+    const profile = [
+      opts.department && `Department: ${opts.department}`,
+      opts.discipline && `Discipline: ${opts.discipline}`,
+      opts.sector && `Sector: ${opts.sector}`,
+      opts.company && `Company: ${opts.company}`,
+      opts.university && `University: ${opts.university}`,
+    ].filter(Boolean).join(', ')
+
+    const statusSummary = opts.problems.reduce((acc: Record<string, number>, p) => {
+      acc[p.status] = (acc[p.status] || 0) + 1
+      return acc
+    }, {})
+
+    const prompt = `You are an AI assistant for a civic problem platform in India. Generate a personalised welcome insight for a ${opts.role} user.
+
+User: ${opts.name}
+Profile: ${profile}
+Their problems/items (${opts.problems.length} total):
+${JSON.stringify(statusSummary, null, 2)}
+
+Generate a warm, personalised, actionable insight. Respond ONLY with valid JSON:
+{
+  "greeting": "Short personalised greeting mentioning their specific domain",
+  "insight": "1-2 sentence actionable insight about what they should focus on right now based on their data",
+  "priority": "The single most important action they should take (short phrase, optional)",
+  "type": "info | success | warning | urgent"
+}`
+
+    const result = await model.generateContent(prompt)
+    const text = result.response.text()
+    const parsed = extractJson(text)
+    if (!parsed) return null
+    return {
+      greeting: parsed.greeting || `Welcome back, ${opts.name}`,
+      insight: parsed.insight || '',
+      priority: parsed.priority,
+      type: parsed.type || 'info',
+    }
+  } catch (error) {
+    console.error('AI welcome insight error:', error)
+    return null
+  }
+}
+

@@ -2,27 +2,35 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
+import { useSession } from 'next-auth/react'
 import { DashboardShell } from '@/components/layout/Sidebar'
 import { StatusBadge } from '@/components/workflow/StatusBadge'
 import { MapPin, Users, ChevronRight, CheckSquare, Clock, Briefcase, GraduationCap, Loader2 } from 'lucide-react'
 import { format } from 'date-fns'
 
 export default function UniversityDashboard() {
+  const { data: session } = useSession()
   const [problems, setProblems] = useState<any[]>([])
   const [projects, setProjects] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [accepting, setAccepting] = useState<string | null>(null)
+  const [scope, setScope] = useState<'discipline' | 'all'>('discipline')
+
+  const universityName = session?.user?.university
+  const discipline = session?.user?.discipline || session?.user?.department
 
   useEffect(() => {
+    setLoading(true)
+    const problemsUrl = scope === 'all' ? '/api/problems?scope=all' : '/api/problems'
     Promise.all([
-      fetch('/api/problems').then((r) => r.json()),
+      fetch(problemsUrl).then((r) => r.json()),
       fetch('/api/projects').then((r) => r.json()),
     ]).then(([p, pr]) => {
       setProblems(Array.isArray(p) ? p : [])
       setProjects(Array.isArray(pr) ? pr : [])
       setLoading(false)
     })
-  }, [])
+  }, [scope])
 
   const availableProblems = problems.filter((p) =>
     ['VERIFIED', 'UNDER_UNIVERSITY_REVIEW'].includes(p.status)
@@ -53,9 +61,44 @@ export default function UniversityDashboard() {
   return (
     <DashboardShell>
       <div className="page-content space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">University Dashboard</h1>
-          <p className="text-sm text-slate-500 mt-1">Review government-verified problems and manage university projects.</p>
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div>
+            {(universityName || discipline) && (
+              <div className="flex items-center gap-2 flex-wrap text-xs mb-1">
+                {universityName && (
+                  <span className="inline-flex items-center gap-1 font-semibold text-violet-700 bg-violet-50 px-2 py-0.5 rounded">
+                    <GraduationCap className="w-3 h-3" />
+                    {universityName}
+                  </span>
+                )}
+                {discipline && (
+                  <span className="text-slate-500 font-medium">{discipline}</span>
+                )}
+              </div>
+            )}
+            <h1 className="text-2xl font-bold text-slate-900">University Dashboard</h1>
+            <p className="text-sm text-slate-500 mt-1">
+              {discipline ? `Showing verified problems matching ${discipline}.` : 'Review government-verified problems and manage university projects.'}
+            </p>
+          </div>
+          <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200 text-xs font-medium self-start sm:self-auto">
+            <button
+              onClick={() => setScope('discipline')}
+              className={`px-3 py-1.5 rounded-md transition-all ${
+                scope === 'discipline' ? 'bg-white text-violet-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              My Discipline ({problems.length})
+            </button>
+            <button
+              onClick={() => setScope('all')}
+              className={`px-3 py-1.5 rounded-md transition-all ${
+                scope === 'all' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              All Verified
+            </button>
+          </div>
         </div>
 
         {/* Stats */}

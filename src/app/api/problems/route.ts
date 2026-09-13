@@ -11,19 +11,93 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const status = searchParams.get('status')
   const citizenId = searchParams.get('citizenId')
-  const scope = searchParams.get('scope') // 'my' | 'community'
+  const scope = searchParams.get('scope') // 'my' | 'community' | 'my_dept' | 'all'
   const category = searchParams.get('category')
   const isEmergencyOnly = searchParams.get('emergency') === 'true'
 
   const where: any = {}
+  const role = session.user.role
 
-  if (session.user.role === 'CITIZEN') {
-    if (scope === 'my') {
+  if (role === 'CITIZEN') {
+    // Citizens: 'my' → only own problems; 'community' → all problems in the platform
+    if (scope === 'community') {
+      // No filter — they can see all community problems
+    } else {
+      // Default: personal problems only
       where.citizenId = session.user.id
     }
-    // If scope === 'community', show all reported problems so citizen can explore and confirm
-  } else if (citizenId) {
-    where.citizenId = citizenId
+  } else if (role === 'GOVERNMENT') {
+    // Government: filter by department relevance unless admin-override scope=all
+    if (scope !== 'all') {
+      const dept = (session.user.department || '').toLowerCase()
+      if (dept) {
+        const deptKeywords = dept.split(/[\s,&]+/).filter(Boolean)
+        const categoryMap: Record<string, string[]> = {
+          water: ['WATER_SUPPLY', 'DRAINAGE_FLOODING'],
+          sanitation: ['SANITATION'],
+          drainage: ['DRAINAGE_FLOODING'],
+          road: ['ROAD_TRANSPORT', 'INFRASTRUCTURE'],
+          transport: ['ROAD_TRANSPORT'],
+          pwd: ['ROAD_TRANSPORT', 'INFRASTRUCTURE'],
+          electricity: ['ELECTRICITY'],
+          urban: ['INFRASTRUCTURE', 'SANITATION', 'WATER_SUPPLY', 'DRAINAGE_FLOODING', 'ROAD_TRANSPORT', 'ELECTRICITY', 'ENVIRONMENT'],
+          development: ['INFRASTRUCTURE'],
+          health: ['HEALTHCARE'],
+          education: ['EDUCATION'],
+          environment: ['ENVIRONMENT'],
+          agriculture: ['AGRICULTURE'],
+          revenue: ['INFRASTRUCTURE'],
+        }
+        const relevantCategories = deptKeywords.flatMap(k => categoryMap[k] || [])
+        if (relevantCategories.length > 0) {
+          where.OR = [
+            { category: { in: relevantCategories } },
+            { aiCategory: { in: relevantCategories } },
+          ]
+        }
+      }
+    }
+    // citizenId filter still supported for admin lookup
+    if (citizenId) where.citizenId = citizenId
+  } else if (role === 'UNIVERSITY') {
+    // University: only see verified problems ready for university review
+    // Optionally filter by discipline match via AI recommended disciplines
+    where.status = { in: ['VERIFIED', 'UNDER_UNIVERSITY_REVIEW'] }
+    const discipline = session.user.discipline || session.user.department
+    if (discipline && scope !== 'all') {
+      const disc = discipline.toLowerCase()
+      where.OR = [
+        { aiRecommendedDepts: { contains: disc } },
+        { category: { in: getAllCategoriesForDiscipline(disc) } },
+      ]
+    }
+  } else if (role === 'FACULTY') {
+    // Faculty: only see problems linked to projects assigned to them
+    const assignedProjects = await prisma.facultyLeaderAssignment.findMany({
+      where: { facultyId: session.user.id },
+      select: { project: { select: { problemId: true } } },
+    })
+    const problemIds = assignedProjects.map((a: any) => a.project.problemId).filter(Boolean)
+    if (problemIds.length > 0) {
+      where.id = { in: problemIds }
+    } else {
+      // No assigned projects yet — return empty
+      where.id = 'none'
+    }
+  } else if (role === 'INDUSTRY') {
+    // Industry: only see collaboration-stage problems, optionally filtered by sector
+    where.status = { in: ['APPROVED', 'INDUSTRY_COLLABORATION', 'IMPLEMENTATION', 'PROBLEM_SOLVED', 'SUSTAINABLE_IMPACT'] }
+    const sector = session.user.sector
+    if (sector && scope !== 'all') {
+      const sec = sector.toLowerCase()
+      where.OR = [
+        { aiRecommendedDepts: { contains: sec } },
+        { category: { in: getAllCategoriesForSector(sec) } },
+      ]
+    }
+  } else if (role === 'ADMIN') {
+    // Admin: sees everything, optional citizenId filter
+    if (citizenId) where.citizenId = citizenId
   }
 
   if (status && status !== 'ALL') where.status = status
@@ -56,6 +130,39 @@ export async function GET(req: NextRequest) {
 
   return Response.json(formatted)
 }
+
+// Helper: map discipline keywords to relevant problem categories
+function getAllCategoriesForDiscipline(discipline: string): string[] {
+  const d = discipline.toLowerCase()
+  if (d.includes('civil') || d.includes('structural')) return ['INFRASTRUCTURE', 'ROAD_TRANSPORT', 'DRAINAGE_FLOODING']
+  if (d.includes('computer') || d.includes('software') || d.includes('it') || d.includes('digital')) return ['DIGITAL_SERVICES', 'INFRASTRUCTURE']
+  if (d.includes('environment') || d.includes('ecology')) return ['ENVIRONMENT', 'DRAINAGE_FLOODING', 'WATER_SUPPLY']
+  if (d.includes('mechanical')) return ['INFRASTRUCTURE', 'ROAD_TRANSPORT']
+  if (d.includes('electrical') || d.includes('electronic')) return ['ELECTRICITY', 'INFRASTRUCTURE']
+  if (d.includes('medical') || d.includes('health') || d.includes('biomedical')) return ['HEALTHCARE']
+  if (d.includes('agriculture') || d.includes('agri')) return ['AGRICULTURE', 'WATER_SUPPLY']
+  if (d.includes('architecture') || d.includes('urban')) return ['INFRASTRUCTURE', 'SANITATION']
+  if (d.includes('water') || d.includes('hydro')) return ['WATER_SUPPLY', 'DRAINAGE_FLOODING']
+  // Default: return a broad set
+  return ['INFRASTRUCTURE', 'SANITATION', 'WATER_SUPPLY', 'ROAD_TRANSPORT', 'ELECTRICITY', 'ENVIRONMENT']
+}
+
+// Helper: map industry sector keywords to relevant problem categories
+function getAllCategoriesForSector(sector: string): string[] {
+  const s = sector.toLowerCase()
+  if (s.includes('tech') || s.includes('software') || s.includes('it')) return ['DIGITAL_SERVICES', 'INFRASTRUCTURE']
+  if (s.includes('construct') || s.includes('infrastructure')) return ['INFRASTRUCTURE', 'ROAD_TRANSPORT', 'DRAINAGE_FLOODING']
+  if (s.includes('health') || s.includes('pharma')) return ['HEALTHCARE']
+  if (s.includes('agri') || s.includes('farm')) return ['AGRICULTURE', 'WATER_SUPPLY']
+  if (s.includes('energy') || s.includes('power') || s.includes('electric')) return ['ELECTRICITY', 'ENVIRONMENT']
+  if (s.includes('water') || s.includes('sanit')) return ['WATER_SUPPLY', 'SANITATION', 'DRAINAGE_FLOODING']
+  if (s.includes('transport') || s.includes('logistic')) return ['ROAD_TRANSPORT', 'INFRASTRUCTURE']
+  if (s.includes('environment') || s.includes('green')) return ['ENVIRONMENT', 'DRAINAGE_FLOODING']
+  // Default: all collaboration-ready
+  return ['INFRASTRUCTURE', 'SANITATION', 'WATER_SUPPLY', 'ROAD_TRANSPORT', 'ELECTRICITY', 'ENVIRONMENT', 'HEALTHCARE']
+}
+
+
 
 export async function POST(req: NextRequest) {
   const session = await auth()

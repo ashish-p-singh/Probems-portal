@@ -8,7 +8,19 @@ declare module 'next-auth' {
       email: string
       role: string
       accountStatus?: string
+      // Government
       department?: string
+      jurisdiction?: string
+      authority?: string
+      designation?: string
+      // University / Faculty
+      university?: string
+      discipline?: string
+      expertise?: string
+      // Industry
+      sector?: string
+      industryType?: string
+      company?: string
       image?: string | null
     }
   }
@@ -20,6 +32,15 @@ declare module 'next-auth' {
     role: string
     accountStatus?: string
     department?: string
+    jurisdiction?: string
+    authority?: string
+    designation?: string
+    university?: string
+    discipline?: string
+    expertise?: string
+    sector?: string
+    industryType?: string
+    company?: string
   }
 }
 
@@ -29,5 +50,15 @@ declare module 'next-auth/jwt' {
     role: string
     accountStatus?: string
     department?: string
+    jurisdiction?: string
+    authority?: string
+    designation?: string
+    university?: string
+    discipline?: string
+    expertise?: string
+    sector?: string
+    industryType?: string
+    company?: string
   }
 }
+

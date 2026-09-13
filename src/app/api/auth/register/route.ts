@@ -16,6 +16,10 @@ export async function POST(req: NextRequest) {
       company,
       jurisdiction,
       designation,
+      discipline,   // University/Faculty: e.g. "Civil Engineering"
+      expertise,    // Faculty only
+      sector,       // Industry sector
+      industryType, // SME | Large Enterprise | Startup | MNC
     } = body
 
     if (!name || !email || !password || !role) {
@@ -54,7 +58,7 @@ export async function POST(req: NextRequest) {
       profileData.university = {
         create: {
           university: university || 'Partner University',
-          department: department || 'Innovation & Research',
+          department: discipline || department || 'Innovation & Research',
           designation: designation || 'Coordinator',
         },
       }
@@ -62,18 +66,22 @@ export async function POST(req: NextRequest) {
       profileData.faculty = {
         create: {
           university: university || 'Partner University',
-          department: department || 'Engineering',
+          department: discipline || department || 'Engineering',
+          expertise: expertise || undefined,
           designation: designation || 'Assistant Professor',
         },
       }
     } else if (role === 'INDUSTRY') {
+      // Combine sector + industry type for rich context
+      const combinedSector = [sector, industryType].filter(Boolean).join(' — ') || 'Technology & Infrastructure'
       profileData.industry = {
         create: {
           company: company || 'Industry Partner',
-          sector: department || 'Technology & Infrastructure',
+          sector: combinedSector,
         },
       }
     }
+
 
     const user = await prisma.user.create({
       data: {

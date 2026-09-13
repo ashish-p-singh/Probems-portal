@@ -2,18 +2,24 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
+import { useSession } from 'next-auth/react'
 import { DashboardShell } from '@/components/layout/Sidebar'
 import { StatusBadge } from '@/components/workflow/StatusBadge'
-import { ChevronRight, Factory, TrendingUp, CheckCircle, Loader2 } from 'lucide-react'
+import { ChevronRight, Factory, TrendingUp, CheckCircle, Loader2, Building2, Tag } from 'lucide-react'
 
 export default function IndustryDashboard() {
+  const { data: session } = useSession()
   const [projects, setProjects] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
-  const [collaborations, setCollaborations] = useState<any[]>([])
+  const [scope, setScope] = useState<'sector' | 'all'>('sector')
+
+  const companyName = session?.user?.company
+  const sector = session?.user?.sector
 
   useEffect(() => {
-    // Load approved projects (available for collaboration)
-    fetch('/api/problems')
+    setLoading(true)
+    const url = scope === 'all' ? '/api/problems?scope=all' : '/api/problems'
+    fetch(url)
       .then((r) => r.json())
       .then((d) => {
         const approved = (Array.isArray(d) ? d : []).filter((p: any) =>
@@ -22,7 +28,7 @@ export default function IndustryDashboard() {
         setProjects(approved)
         setLoading(false)
       })
-  }, [])
+  }, [scope])
 
   const opportunities = projects.filter((p: any) => p.status === 'APPROVED')
   const active = projects.filter((p: any) => ['INDUSTRY_COLLABORATION', 'IMPLEMENTATION'].includes(p.status))
@@ -30,9 +36,47 @@ export default function IndustryDashboard() {
   return (
     <DashboardShell>
       <div className="page-content space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">Industry Dashboard</h1>
-          <p className="text-sm text-slate-500 mt-1">Government-approved projects seeking industry collaboration.</p>
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div>
+            {(companyName || sector) && (
+              <div className="flex items-center gap-2 flex-wrap text-xs mb-1">
+                {companyName && (
+                  <span className="inline-flex items-center gap-1 font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded">
+                    <Building2 className="w-3 h-3" />
+                    {companyName}
+                  </span>
+                )}
+                {sector && (
+                  <span className="inline-flex items-center gap-1 text-slate-500 font-medium">
+                    <Tag className="w-3 h-3" />
+                    {sector}
+                  </span>
+                )}
+              </div>
+            )}
+            <h1 className="text-2xl font-bold text-slate-900">Industry Dashboard</h1>
+            <p className="text-sm text-slate-500 mt-1">
+              {sector ? `Collaboration opportunities matched to ${sector}.` : 'Government-approved projects seeking industry collaboration.'}
+            </p>
+          </div>
+          <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200 text-xs font-medium self-start sm:self-auto">
+            <button
+              onClick={() => setScope('sector')}
+              className={`px-3 py-1.5 rounded-md transition-all ${
+                scope === 'sector' ? 'bg-white text-emerald-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              My Sector ({projects.length})
+            </button>
+            <button
+              onClick={() => setScope('all')}
+              className={`px-3 py-1.5 rounded-md transition-all ${
+                scope === 'all' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              All Projects
+            </button>
+          </div>
         </div>
 
         <div className="grid grid-cols-3 gap-4">
