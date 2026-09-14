@@ -48,6 +48,9 @@ export default function UniversityDashboard() {
         const proj = await res.json()
         setProjects((prev) => [proj, ...prev])
         setProblems((prev) => prev.map((p) => p.id === problemId ? { ...p, status: 'ACCEPTED' } : p))
+      } else {
+        const err = await res.json().catch(() => ({}))
+        alert(err.error || 'Failed to accept problem')
       }
     } finally {
       setAccepting(null)

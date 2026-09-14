@@ -60,9 +60,8 @@ export async function GET(req: NextRequest) {
     // citizenId filter still supported for admin lookup
     if (citizenId) where.citizenId = citizenId
   } else if (role === 'UNIVERSITY') {
-    // University: only see verified problems ready for university review
-    // Optionally filter by discipline match via AI recommended disciplines
-    where.status = { in: ['VERIFIED', 'UNDER_UNIVERSITY_REVIEW'] }
+    // University: see verified problems ready for university adoption as well as accepted/research stages
+    where.status = { in: ['VERIFIED', 'UNDER_UNIVERSITY_REVIEW', 'ACCEPTED', 'TEAM_FORMATION', 'SOLUTION_DEVELOPMENT'] }
     const discipline = session.user.discipline || session.user.department
     if (discipline && scope !== 'all') {
       const disc = discipline.toLowerCase()

@@ -39,6 +39,9 @@ export default function UniversityProblemsPage() {
       if (res.ok) {
         const proj = await res.json()
         router.push(`/university/projects/${proj.id}`)
+      } else {
+        const err = await res.json().catch(() => ({}))
+        alert(err.error || 'Failed to accept problem')
       }
     } finally {
       setAcceptingId(null)

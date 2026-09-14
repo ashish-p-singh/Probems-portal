@@ -378,30 +378,73 @@ export async function generateWelcomeInsight(opts: {
   sector?: string
   company?: string
   university?: string
-  problems: Array<{ status: string; category: string; title: string }>
+  problems: Array<{
+    status: string
+    category: string
+    title: string
+    isEmergency?: boolean
+    referenceId?: string
+    confirmationCount?: number
+  }>
 }): Promise<{
   greeting: string
+  summary?: string
   insight: string
+  statusBreakdown?: string
   priority?: string
   type: 'info' | 'success' | 'warning' | 'urgent'
 } | null> {
   if (!opts.problems.length) return null
+
+  const statusSummary = opts.problems.reduce((acc: Record<string, number>, p) => {
+    acc[p.status] = (acc[p.status] || 0) + 1
+    return acc
+  }, {})
+
   try {
     const model = genAI.getGenerativeModel({ model: AI_MODEL })
-    const profile = [
-      opts.department && `Department: ${opts.department}`,
-      opts.discipline && `Discipline: ${opts.discipline}`,
-      opts.sector && `Sector: ${opts.sector}`,
-      opts.company && `Company: ${opts.company}`,
-      opts.university && `University: ${opts.university}`,
-    ].filter(Boolean).join(', ')
 
-    const statusSummary = opts.problems.reduce((acc: Record<string, number>, p) => {
-      acc[p.status] = (acc[p.status] || 0) + 1
-      return acc
-    }, {})
+    let prompt = ''
+    if (opts.role === 'CITIZEN') {
+      const problemList = opts.problems.slice(0, 15).map(p =>
+        `- "${p.title}" (${p.category}): Status is ${p.status}${p.isEmergency ? ' [EMERGENCY]' : ''}${p.confirmationCount ? `, ${p.confirmationCount} community confirmations` : ''}`
+      ).join('\n')
 
-    const prompt = `You are an AI assistant for a civic problem platform in India. Generate a personalised welcome insight for a ${opts.role} user.
+      prompt = `You are an AI Civic Assistant analyzing a citizen's dashboard and submitted civic issues in India.
+User: ${opts.name}
+Total Problems Reported by Citizen: ${opts.problems.length}
+Problems:
+${problemList}
+Status counts:
+${JSON.stringify(statusSummary, null, 2)}
+
+Provide an intelligent, encouraging, transparent summary of their personal dashboard and the status/progress of their problems:
+1. "greeting": Friendly greeting recognizing their civic contribution (e.g. "Welcome back, ${opts.name}! Here is your civic activity summary.")
+2. "summary": A clear 2-3 sentence overview of their dashboard and the overall status of the issues they reported (how many are undergoing verification, progressing in university research or industry collaboration, or solved).
+3. "statusBreakdown": A concise 1-2 sentence breakdown of key statuses and progression stages.
+4. "insight": Helpful advice on what will happen next, or what action the citizen can take (e.g. gathering community confirmations, checking official updates).
+5. "priority": The most critical next step or upcoming milestone (short phrase).
+6. "type": "info" | "success" | "warning" | "urgent" (use "urgent" if any emergency issue is active, "success" if issues are solved, "info" otherwise).
+
+Respond ONLY with valid JSON:
+{
+  "greeting": "string",
+  "summary": "string",
+  "statusBreakdown": "string",
+  "insight": "string",
+  "priority": "string",
+  "type": "info | success | warning | urgent"
+}`
+    } else {
+      const profile = [
+        opts.department && `Department: ${opts.department}`,
+        opts.discipline && `Discipline: ${opts.discipline}`,
+        opts.sector && `Sector: ${opts.sector}`,
+        opts.company && `Company: ${opts.company}`,
+        opts.university && `University: ${opts.university}`,
+      ].filter(Boolean).join(', ')
+
+      prompt = `You are an AI assistant for a civic problem platform in India. Generate a personalised welcome insight for a ${opts.role} user.
 
 User: ${opts.name}
 Profile: ${profile}
@@ -411,24 +454,43 @@ ${JSON.stringify(statusSummary, null, 2)}
 Generate a warm, personalised, actionable insight. Respond ONLY with valid JSON:
 {
   "greeting": "Short personalised greeting mentioning their specific domain",
+  "summary": "1-2 sentence summary of their domain problems",
   "insight": "1-2 sentence actionable insight about what they should focus on right now based on their data",
   "priority": "The single most important action they should take (short phrase, optional)",
   "type": "info | success | warning | urgent"
 }`
+    }
 
     const result = await model.generateContent(prompt)
     const text = result.response.text()
     const parsed = extractJson(text)
-    if (!parsed) return null
-    return {
-      greeting: parsed.greeting || `Welcome back, ${opts.name}`,
-      insight: parsed.insight || '',
-      priority: parsed.priority,
-      type: parsed.type || 'info',
+    if (parsed) {
+      return {
+        greeting: parsed.greeting || `Welcome back, ${opts.name}`,
+        summary: parsed.summary || '',
+        insight: parsed.insight || '',
+        statusBreakdown: parsed.statusBreakdown || '',
+        priority: parsed.priority,
+        type: parsed.type || 'info',
+      }
     }
   } catch (error) {
     console.error('AI welcome insight error:', error)
-    return null
+  }
+
+  // Fallback heuristic if AI model is unavailable or encounters error
+  const activeCount = opts.problems.filter(p => !['SUSTAINABLE_IMPACT', 'PROBLEM_SOLVED', 'REJECTED_BY_GOVT', 'REJECTED_BY_UNIVERSITY'].includes(p.status)).length
+  const resolvedCount = opts.problems.filter(p => ['SUSTAINABLE_IMPACT', 'PROBLEM_SOLVED'].includes(p.status)).length
+  const emergencyCount = opts.problems.filter(p => p.isEmergency).length
+
+  return {
+    greeting: `Welcome back, ${opts.name}`,
+    summary: `You have submitted ${opts.problems.length} civic ${opts.problems.length === 1 ? 'issue' : 'issues'}. ${resolvedCount > 0 ? `${resolvedCount} resolved. ` : ''}${activeCount} active in the resolution workflow.`,
+    statusBreakdown: `${activeCount} problem${activeCount === 1 ? '' : 's'} in progress across verification and project phases.`,
+    insight: `Track the workflow milestones below to see progress updates from government officers and academic partners.`,
+    priority: emergencyCount > 0 ? 'Urgent attention required on emergency reports' : 'Monitor ongoing verification',
+    type: emergencyCount > 0 ? 'urgent' : resolvedCount > 0 ? 'success' : 'info',
   }
 }
+
 
