@@ -33,6 +33,11 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
 
         if (!isValid) return null
 
+        // Enforce account approval check: accounts requiring approval (PENDING or SUSPENDED/REJECTED) cannot log in.
+        if (user.accountStatus && user.accountStatus !== 'APPROVED') {
+          return null
+        }
+
         return {
           id: user.id,
           name: user.name,

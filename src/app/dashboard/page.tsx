@@ -8,6 +8,11 @@ export default async function DashboardPage() {
     redirect('/login')
   }
 
+  // If user account is not approved, send back to login
+  if (session.user.accountStatus && session.user.accountStatus !== 'APPROVED') {
+    redirect('/login')
+  }
+
   const role = session.user.role
 
   switch (role) {

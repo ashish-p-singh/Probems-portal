@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { AlertCircle, CheckCircle, Building2, GraduationCap, Factory, User, ChevronDown } from 'lucide-react'
+import { AlertCircle, CheckCircle, Building2, GraduationCap, Factory, User, ChevronDown, Clock, ArrowRight } from 'lucide-react'
 
 const roles = [
   { value: 'CITIZEN', label: 'Citizen', icon: '🏘️', desc: 'Report civic problems in your area' },
@@ -143,7 +143,9 @@ export default function RegisterPage() {
       const d = await res.json()
       if (!res.ok) throw new Error(d.error || 'Registration failed')
       setSuccess(true)
-      setTimeout(() => router.push('/login'), 2500)
+      if (form.role === 'CITIZEN') {
+        setTimeout(() => router.push('/login'), 2000)
+      }
     } catch (err: any) {
       setError(err.message)
     } finally {
@@ -152,16 +154,59 @@ export default function RegisterPage() {
   }
 
   if (success) {
+    const isApprovalRequired = form.role !== 'CITIZEN'
+
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-8">
-        <div className="card p-10 text-center max-w-sm w-full">
-          <CheckCircle className="w-12 h-12 text-emerald-500 mx-auto mb-4" />
-          <h2 className="text-xl font-bold text-slate-900 mb-2">Account Created!</h2>
-          <p className="text-slate-500 text-sm">
-            {form.role === 'CITIZEN'
-              ? 'Your account is ready. Redirecting to login…'
-              : 'Your institutional account is pending Admin approval. Redirecting to login…'}
-          </p>
+      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center p-6">
+        <div className="card p-8 sm:p-10 text-center max-w-md w-full border border-slate-200 dark:border-slate-800 shadow-xl">
+          {isApprovalRequired ? (
+            <>
+              <div className="w-16 h-16 bg-amber-100 dark:bg-amber-950/60 rounded-2xl flex items-center justify-center mx-auto mb-5 border border-amber-200 dark:border-amber-800">
+                <Clock className="w-8 h-8 text-amber-600 dark:text-amber-400 animate-pulse" />
+              </div>
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300 mb-3">
+                Approval Required
+              </span>
+              <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">Registration Submitted!</h2>
+              <p className="text-slate-600 dark:text-slate-300 text-sm leading-relaxed mb-6">
+                Your <span className="font-semibold text-slate-900 dark:text-white">{selectedRole?.label}</span> account requires administrative verification. Please wait for confirmation by a Platform Administrator before logging in.
+              </p>
+              <div className="bg-slate-50 dark:bg-slate-900 rounded-xl p-4 text-xs text-slate-500 dark:text-slate-400 text-left space-y-2 border border-slate-200/80 dark:border-slate-800 mb-6">
+                <div className="flex items-start gap-2">
+                  <span className="text-amber-500 font-bold">•</span>
+                  <span>Institutional accounts undergo verification to ensure credentials and authorized authority.</span>
+                </div>
+                <div className="flex items-start gap-2">
+                  <span className="text-amber-500 font-bold">•</span>
+                  <span>Once confirmed, you will be able to log in with your email <span className="font-semibold text-slate-700 dark:text-slate-200">{form.email}</span>.</span>
+                </div>
+              </div>
+              <Link
+                href="/login"
+                className="btn-primary w-full justify-center py-2.5 flex items-center gap-2"
+              >
+                Go to Sign In
+                <ArrowRight className="w-4 h-4" />
+              </Link>
+            </>
+          ) : (
+            <>
+              <div className="w-16 h-16 bg-emerald-100 dark:bg-emerald-950/60 rounded-2xl flex items-center justify-center mx-auto mb-5 border border-emerald-200 dark:border-emerald-800">
+                <CheckCircle className="w-8 h-8 text-emerald-600 dark:text-emerald-400" />
+              </div>
+              <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">Account Ready!</h2>
+              <p className="text-slate-500 dark:text-slate-400 text-sm mb-6">
+                Your Citizen account is active. Redirecting you to sign in...
+              </p>
+              <Link
+                href="/login"
+                className="btn-primary w-full justify-center py-2.5 flex items-center gap-2"
+              >
+                Sign In Now
+                <ArrowRight className="w-4 h-4" />
+              </Link>
+            </>
+          )}
         </div>
       </div>
     )

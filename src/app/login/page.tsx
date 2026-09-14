@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { signIn } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { Eye, EyeOff, AlertCircle } from 'lucide-react'
+import { Eye, EyeOff, AlertCircle, Clock } from 'lucide-react'
 
 const demoAccounts = [
   { role: 'Admin', email: 'admin@demo.sih', color: 'bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200' },
@@ -28,6 +28,34 @@ export default function LoginPage() {
     e.preventDefault()
     setLoading(true)
     setError('')
+
+    // Pre-check account status to provide explicit feedback if pending or suspended
+    try {
+      const statusRes = await fetch('/api/auth/check-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim(), password }),
+      })
+      if (statusRes.ok) {
+        const data = await statusRes.json()
+        if (data.status === 'PENDING') {
+          setError(
+            'Your account is pending confirmation by a Platform Administrator. You will be able to log in once your application is verified and approved.'
+          )
+          setLoading(false)
+          return
+        }
+        if (data.status === 'SUSPENDED' || data.status === 'REJECTED') {
+          setError(
+            `Your account has been ${data.status.toLowerCase()}. Please contact the platform administration for assistance.`
+          )
+          setLoading(false)
+          return
+        }
+      }
+    } catch {
+      // If pre-check fails, proceed with standard sign-in flow
+    }
 
     const result = await signIn('credentials', {
       email,
@@ -174,9 +202,26 @@ export default function LoginPage() {
             </div>
 
             {error && (
-              <div className="flex items-center gap-2 text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2 text-sm">
-                <AlertCircle className="w-4 h-4 flex-shrink-0" />
-                {error}
+              <div
+                className={`flex items-start gap-2.5 rounded-xl px-3.5 py-3 text-sm border ${
+                  error.includes('pending confirmation')
+                    ? 'bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-200 border-amber-200 dark:border-amber-800'
+                    : 'bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300 border-red-200 dark:border-red-900'
+                }`}
+              >
+                {error.includes('pending confirmation') ? (
+                  <Clock className="w-5 h-5 flex-shrink-0 text-amber-600 dark:text-amber-400 mt-0.5" />
+                ) : (
+                  <AlertCircle className="w-5 h-5 flex-shrink-0 text-red-600 dark:text-red-400 mt-0.5" />
+                )}
+                <div className="leading-snug">
+                  {error.includes('pending confirmation') && (
+                    <p className="font-semibold text-xs uppercase tracking-wider text-amber-800 dark:text-amber-300 mb-0.5">
+                      Account Under Review
+                    </p>
+                  )}
+                  <span>{error}</span>
+                </div>
               </div>
             )}
 
