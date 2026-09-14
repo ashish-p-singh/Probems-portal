@@ -71,6 +71,44 @@ export default function ProblemCaseRoomPage() {
   const [resolutionStatus, setResolutionStatus] = useState('CONFIRMED_IMPROVED')
   const [resolutionComment, setResolutionComment] = useState('')
 
+  // University & Faculty interactive modals
+  const [showAssignFacultyModal, setShowAssignFacultyModal] = useState(false)
+  const [facultyList, setFacultyList] = useState<any[]>([])
+  const [selectedFacultyId, setSelectedFacultyId] = useState('')
+  const [loadingFaculty, setLoadingFaculty] = useState(false)
+
+  const [showTeamModal, setShowTeamModal] = useState(false)
+  const [candidatesList, setCandidatesList] = useState<any[]>([])
+  const [loadingCandidates, setLoadingCandidates] = useState(false)
+  const [teamForm, setTeamForm] = useState({
+    teamName: '',
+    teamDescription: '',
+    userId: '',
+    role: 'Student Researcher',
+    discipline: 'Computer Science & IoT',
+    department: '',
+    responsibilities: '',
+  })
+
+  const [showSolutionModal, setShowSolutionModal] = useState(false)
+  const [solutionForm, setSolutionForm] = useState({
+    proposedSolution: '',
+    problemStatement: '',
+    rootCause: '',
+    technicalApproach: '',
+    expectedImpact: '',
+    estimatedCost: '',
+    timeline: '6 weeks',
+    requiredResources: '',
+    implementationPlan: '',
+    sustainabilityPlan: '',
+    prototypeUrl: '',
+    alternativesConsidered: '',
+  })
+
+  const [showSignOffModal, setShowSignOffModal] = useState(false)
+  const [facultyRemarks, setFacultyRemarks] = useState('')
+
   const fetchProblem = () => {
     fetch(`/api/problems/${id}`)
       .then((r) => r.json())
@@ -178,17 +216,28 @@ export default function ProblemCaseRoomPage() {
   }
 
   const handleAcceptChallenge = async () => {
-    if (!project?.id) return
     setActionLoading(true)
     try {
-      const res = await fetch(`/api/projects/${project.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'ACCEPT_CHALLENGE' }),
-      })
-      if (res.ok) {
-        setFeedbackMsg('University successfully accepted the challenge.')
-        fetchProblem()
+      if (project?.id) {
+        const res = await fetch(`/api/projects/${project.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'ACCEPT_CHALLENGE' }),
+        })
+        if (res.ok) {
+          setFeedbackMsg('University successfully accepted the challenge.')
+          fetchProblem()
+        }
+      } else {
+        const res = await fetch('/api/projects', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ problemId: problem.id }),
+        })
+        if (res.ok) {
+          setFeedbackMsg('University accepted problem and initialized research challenge.')
+          fetchProblem()
+        }
       }
     } catch (err) {
       console.error(err)
@@ -306,6 +355,292 @@ export default function ProblemCaseRoomPage() {
       }
     } catch (err) {
       console.error(err)
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  // Ensure project exists helper
+  const ensureProjectId = async (): Promise<string | null> => {
+    if (project?.id) return project.id
+    try {
+      const res = await fetch('/api/projects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ problemId: problem.id }),
+      })
+      if (res.ok) {
+        const newProj = await res.json()
+        await fetchProblem()
+        return newProj.id
+      }
+    } catch (e) {
+      console.error('Error auto-creating project:', e)
+    }
+    return null
+  }
+
+  // 1. Faculty Assignment Handlers
+  const openAssignFacultyModal = async () => {
+    setShowAssignFacultyModal(true)
+    setLoadingFaculty(true)
+    try {
+      const r = await fetch('/api/faculty')
+      const data = await r.json()
+      setFacultyList(Array.isArray(data) ? data : [])
+    } catch (e) {
+      console.error('Failed to load faculty list', e)
+    } finally {
+      setLoadingFaculty(false)
+    }
+  }
+
+  const handleAssignFaculty = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!selectedFacultyId) return
+    setActionLoading(true)
+    try {
+      const projId = await ensureProjectId()
+      if (!projId) {
+        alert('Could not initialize project record.')
+        return
+      }
+      const res = await fetch(`/api/projects/${projId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'ASSIGN_FACULTY', facultyId: selectedFacultyId }),
+      })
+      if (res.ok) {
+        setFeedbackMsg('Faculty Leader successfully assigned to this project.')
+        setShowAssignFacultyModal(false)
+        fetchProblem()
+      } else {
+        const d = await res.json()
+        alert(d.error || 'Failed to assign faculty')
+      }
+    } catch (err: any) {
+      alert(err.message)
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  // 2. Team & Students Management Handlers
+  const openTeamModal = async () => {
+    setShowTeamModal(true)
+    setLoadingCandidates(true)
+    setTeamForm({
+      teamName: team?.name || `${problem.title.split(' ')[0]} Multidisciplinary Team`,
+      teamDescription: team?.description || 'Engineers and researchers collaborating on civic resolution',
+      userId: '',
+      role: 'Student Researcher',
+      discipline: 'Computer Science & IoT',
+      department: '',
+      responsibilities: '',
+    })
+    try {
+      const r = await fetch('/api/team-candidates')
+      const data = await r.json()
+      setCandidatesList(Array.isArray(data) ? data : [])
+    } catch (e) {
+      console.error('Failed to load team candidates', e)
+    } finally {
+      setLoadingCandidates(false)
+    }
+  }
+
+  const handleSaveTeamOrMember = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setActionLoading(true)
+    try {
+      const projId = await ensureProjectId()
+      if (!projId) return
+
+      if (teamForm.userId) {
+        // Add single member
+        const res = await fetch(`/api/projects/${projId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'ADD_TEAM_MEMBER',
+            userId: teamForm.userId,
+            role: teamForm.role,
+            discipline: teamForm.discipline,
+            department: teamForm.department,
+            responsibilities: teamForm.responsibilities,
+          }),
+        })
+        if (res.ok) {
+          setFeedbackMsg('Team member successfully added.')
+          setShowTeamModal(false)
+          fetchProblem()
+        } else {
+          const d = await res.json()
+          alert(d.error || 'Failed to add member')
+        }
+      } else {
+        // Create / Update team metadata
+        const res = await fetch(`/api/projects/${projId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'CREATE_TEAM',
+            teamName: teamForm.teamName,
+            teamDescription: teamForm.teamDescription,
+          }),
+        })
+        if (res.ok) {
+          setFeedbackMsg('Team successfully assembled.')
+          setShowTeamModal(false)
+          fetchProblem()
+        }
+      }
+    } catch (err: any) {
+      alert(err.message)
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const handleRemoveMember = async (memberId: string) => {
+    if (!project?.id || !confirm('Remove this member from the project team?')) return
+    setActionLoading(true)
+    try {
+      const res = await fetch(`/api/projects/${project.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'REMOVE_TEAM_MEMBER', memberId }),
+      })
+      if (res.ok) {
+        setFeedbackMsg('Team member removed.')
+        fetchProblem()
+      }
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  // 3. Solution Proposal Handlers
+  const openSolutionModal = () => {
+    setSolutionForm({
+      proposedSolution: solution?.proposedSolution || '',
+      problemStatement: solution?.problemStatement || problem.title,
+      rootCause: solution?.rootCause || '',
+      technicalApproach: solution?.technicalApproach || '',
+      expectedImpact: solution?.expectedImpact || '',
+      estimatedCost: solution?.estimatedCost ? String(solution.estimatedCost) : '',
+      timeline: solution?.timeline || '6 weeks',
+      requiredResources: solution?.requiredResources || '',
+      implementationPlan: solution?.implementationPlan || '',
+      sustainabilityPlan: solution?.sustainabilityPlan || '',
+      prototypeUrl: solution?.prototypeUrl || '',
+      alternativesConsidered: solution?.alternativesConsidered || '',
+    })
+    setShowSolutionModal(true)
+  }
+
+  const handleSaveSolution = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setActionLoading(true)
+    try {
+      const projId = await ensureProjectId()
+      if (!projId) return
+
+      const res = await fetch(`/api/projects/${projId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'SAVE_SOLUTION_PROPOSAL',
+          ...solutionForm,
+        }),
+      })
+      if (res.ok) {
+        setFeedbackMsg('Solution proposal saved successfully.')
+        setShowSolutionModal(false)
+        fetchProblem()
+      } else {
+        const d = await res.json()
+        alert(d.error || 'Failed to save solution proposal')
+      }
+    } catch (err: any) {
+      alert(err.message)
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const handleSubmitToFaculty = async () => {
+    if (!project?.id) return
+    setActionLoading(true)
+    try {
+      const res = await fetch(`/api/projects/${project.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'SUBMIT_TO_FACULTY' }),
+      })
+      if (res.ok) {
+        setFeedbackMsg('Solution submitted to Faculty Mentor for academic certification.')
+        fetchProblem()
+      } else {
+        const d = await res.json()
+        alert(d.error || 'Submission failed')
+      }
+    } catch (err: any) {
+      alert(err.message)
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const handleFacultySignOff = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!project?.id) return
+    setActionLoading(true)
+    try {
+      const res = await fetch(`/api/projects/${project.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'FACULTY_SIGN_OFF',
+          facultyRemarks: facultyRemarks || 'Approved by Faculty Leader for Government Validation',
+        }),
+      })
+      if (res.ok) {
+        setFeedbackMsg('Solution certified by Faculty Leader.')
+        setShowSignOffModal(false)
+        fetchProblem()
+      } else {
+        const d = await res.json()
+        alert(d.error || 'Sign-off failed')
+      }
+    } catch (err: any) {
+      alert(err.message)
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const handleSubmitSolutionToGov = async () => {
+    if (!project?.id) return
+    if (!confirm('Submit this solution proposal to the Government for official rubric evaluation?')) return
+    setActionLoading(true)
+    try {
+      const res = await fetch(`/api/projects/${project.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'SUBMIT_SOLUTION' }),
+      })
+      if (res.ok) {
+        setFeedbackMsg('Solution successfully submitted to Government for validation!')
+        fetchProblem()
+      } else {
+        const d = await res.json()
+        alert(d.error || 'Failed to submit solution')
+      }
+    } catch (err: any) {
+      alert(err.message)
     } finally {
       setActionLoading(false)
     }
@@ -516,16 +851,89 @@ export default function ProblemCaseRoomPage() {
                 </button>
               )}
 
-              {/* University Claim Button */}
-              {['UNIVERSITY', 'FACULTY', 'ADMIN'].includes(role) && problem.status === 'VERIFIED' && (
-                <button
-                  onClick={handleAcceptChallenge}
-                  disabled={actionLoading}
-                  className="btn bg-indigo-600 hover:bg-indigo-700 text-white text-xs px-3.5 py-2 flex items-center gap-1.5 shadow-sm"
-                >
-                  <GraduationCap className="w-4 h-4" />
-                  <span>Accept Research Challenge</span>
-                </button>
+              {/* University & Faculty Actions */}
+              {['UNIVERSITY', 'FACULTY', 'ADMIN'].includes(role) && (
+                <>
+                  {/* Accept challenge if not accepted yet */}
+                  {problem.status === 'VERIFIED' && (
+                    <button
+                      onClick={handleAcceptChallenge}
+                      disabled={actionLoading}
+                      className="btn bg-indigo-600 hover:bg-indigo-700 text-white text-xs px-3.5 py-2 flex items-center gap-1.5 shadow-sm"
+                    >
+                      <GraduationCap className="w-4 h-4" />
+                      <span>Accept Research Challenge</span>
+                    </button>
+                  )}
+
+                  {/* Assign Faculty Button (University / Admin) */}
+                  {['UNIVERSITY', 'ADMIN'].includes(role) && (
+                    <button
+                      onClick={openAssignFacultyModal}
+                      disabled={actionLoading}
+                      className="btn bg-violet-600 hover:bg-violet-700 text-white text-xs px-3.5 py-2 flex items-center gap-1.5 shadow-sm"
+                    >
+                      <FlaskConical className="w-4 h-4" />
+                      <span>{project?.facultyAssignment ? 'Change Faculty' : 'Assign Faculty'}</span>
+                    </button>
+                  )}
+
+                  {/* Select Students / Assemble Team */}
+                  <button
+                    onClick={openTeamModal}
+                    disabled={actionLoading}
+                    className="btn bg-slate-800 hover:bg-slate-900 text-white text-xs px-3.5 py-2 flex items-center gap-1.5 shadow-sm"
+                  >
+                    <Users className="w-4 h-4" />
+                    <span>{project?.team ? 'Manage Team' : 'Assemble Team'}</span>
+                  </button>
+
+                  {/* Draft / Edit Solution */}
+                  <button
+                    onClick={openSolutionModal}
+                    disabled={actionLoading}
+                    className="btn bg-emerald-600 hover:bg-emerald-700 text-white text-xs px-3.5 py-2 flex items-center gap-1.5 shadow-sm"
+                  >
+                    <FileText className="w-4 h-4" />
+                    <span>{solution ? 'Edit Solution' : 'Submit Solution'}</span>
+                  </button>
+
+                  {/* Submit to Faculty (University) */}
+                  {role === 'UNIVERSITY' && solution && ['DRAFT', 'CHANGES_REQUESTED'].includes(solution.status) && project?.facultyAssignment && (
+                    <button
+                      onClick={handleSubmitToFaculty}
+                      disabled={actionLoading}
+                      className="btn bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 text-xs px-3.5 py-2 flex items-center gap-1.5 shadow-sm font-semibold"
+                    >
+                      <Sparkles className="w-4 h-4" />
+                      <span>Submit to Faculty Leader</span>
+                    </button>
+                  )}
+
+                  {/* Faculty Review Sign-off (Faculty) */}
+                  {['FACULTY', 'ADMIN'].includes(role) && solution && (!solution.facultyApproved || solution.status === 'FACULTY_REVIEW') && (
+                    <button
+                      onClick={() => setShowSignOffModal(true)}
+                      disabled={actionLoading}
+                      className="btn bg-violet-600 hover:bg-violet-700 text-white text-xs px-3.5 py-2 flex items-center gap-1.5 shadow-sm animate-pulse"
+                    >
+                      <Award className="w-4 h-4" />
+                      <span>Certify Solution</span>
+                    </button>
+                  )}
+
+                  {/* Submit Solution to Government */}
+                  {solution && ['DRAFT', 'FACULTY_REVIEW', 'CHANGES_REQUESTED'].includes(solution.status) && (
+                    <button
+                      onClick={handleSubmitSolutionToGov}
+                      disabled={actionLoading}
+                      className="btn bg-indigo-600 hover:bg-indigo-700 text-white text-xs px-3.5 py-2 flex items-center gap-1.5 shadow-sm"
+                    >
+                      <ArrowRight className="w-4 h-4" />
+                      <span>Submit to Government</span>
+                    </button>
+                  )}
+                </>
               )}
 
               {/* Government Validate Solution Button */}
@@ -832,31 +1240,129 @@ export default function ProblemCaseRoomPage() {
         {/* TAB 5: TEAM & TASKS BOARD */}
         {activeTab === 'team' && (
           <div className="space-y-6">
+            {/* Faculty Mentor Section */}
             <div className="card p-6 space-y-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <h3 className="text-base font-bold text-slate-900">Multidisciplinary Student & Faculty Team</h3>
-                  <p className="text-xs text-slate-500">{team?.name || 'PEC Urban Hydro Impact Team'}</p>
+                  <h3 className="text-base font-bold text-slate-900">Faculty Leader & Academic Mentor</h3>
+                  <p className="text-xs text-slate-500">Provides institutional oversight, technical guidance, and certifies solutions.</p>
                 </div>
+                {['UNIVERSITY', 'ADMIN'].includes(role) && (
+                  <button
+                    onClick={openAssignFacultyModal}
+                    className="btn bg-violet-50 text-violet-700 hover:bg-violet-100 border border-violet-200 text-xs px-3 py-1.5 flex items-center gap-1 font-semibold"
+                  >
+                    <FlaskConical className="w-3.5 h-3.5" />
+                    <span>{project?.facultyAssignment ? 'Change Faculty Leader' : 'Assign Faculty Leader'}</span>
+                  </button>
+                )}
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-                <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-1">
-                  <span className="font-bold text-slate-900 text-sm block">Prof. Kavitha Reddy</span>
-                  <span className="text-indigo-600 font-semibold block">Faculty Mentor & Research Lead</span>
-                  <span className="text-slate-500 block">Civil Engineering</span>
+              {project?.facultyAssignment?.faculty ? (
+                <div className="p-4 bg-violet-50/60 rounded-xl border border-violet-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-violet-600 text-white flex items-center justify-center font-bold text-sm shadow-sm">
+                      {project.facultyAssignment.faculty.name.charAt(0)}
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-slate-900 text-sm">{project.facultyAssignment.faculty.name}</h4>
+                      <p className="text-xs text-violet-700 font-medium">
+                        {project.facultyAssignment.faculty.faculty?.designation || 'Faculty Leader'} • {project.facultyAssignment.faculty.faculty?.department || 'Engineering Department'}
+                      </p>
+                      <p className="text-xs text-slate-500 mt-0.5">{project.facultyAssignment.faculty.email}</p>
+                    </div>
+                  </div>
+                  {project.facultyAssignment.faculty.faculty?.expertise && (
+                    <div className="text-right text-xs max-w-xs">
+                      <span className="text-slate-400 block text-[11px] uppercase tracking-wider font-semibold">Specialization</span>
+                      <span className="text-slate-700 font-medium">{project.facultyAssignment.faculty.faculty.expertise}</span>
+                    </div>
+                  )}
                 </div>
-                <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-1">
-                  <span className="font-bold text-slate-900 text-sm block">Aarav Sharma</span>
-                  <span className="text-indigo-600 font-semibold block">Student Team Lead</span>
-                  <span className="text-slate-500 block">Computer Science & IoT</span>
+              ) : (
+                <div className="p-6 bg-slate-50 rounded-xl border border-dashed border-slate-300 text-center space-y-2">
+                  <FlaskConical className="w-8 h-8 text-slate-400 mx-auto" />
+                  <p className="text-xs font-semibold text-slate-700">No Faculty Leader Assigned</p>
+                  <p className="text-xs text-slate-500 max-w-md mx-auto">
+                    A faculty leader must be designated to guide the multidisciplinary team and sign off on solution proposals.
+                  </p>
+                  {['UNIVERSITY', 'ADMIN'].includes(role) && (
+                    <button
+                      onClick={openAssignFacultyModal}
+                      className="btn-primary text-xs mt-2"
+                    >
+                      Assign Faculty Leader
+                    </button>
+                  )}
                 </div>
-                <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-1">
-                  <span className="font-bold text-slate-900 text-sm block">Meera Patel</span>
-                  <span className="text-indigo-600 font-semibold block">Hydraulics Researcher</span>
-                  <span className="text-slate-500 block">Civil & Environmental Engg</span>
+              )}
+            </div>
+
+            {/* Multidisciplinary Student Team Section */}
+            <div className="card p-6 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">Multidisciplinary Student Team</h3>
+                  <p className="text-xs text-slate-500">
+                    {team?.name || 'Project Team'} {team?.description ? `— ${team.description}` : ''}
+                  </p>
                 </div>
+                {['UNIVERSITY', 'FACULTY', 'ADMIN'].includes(role) && (
+                  <button
+                    onClick={openTeamModal}
+                    className="btn bg-slate-900 hover:bg-black text-white text-xs px-3 py-1.5 flex items-center gap-1.5 shadow-sm font-semibold self-start sm:self-auto"
+                  >
+                    <Users className="w-3.5 h-3.5" />
+                    <span>{team ? 'Select Students / Add Member' : 'Assemble Team'}</span>
+                  </button>
+                )}
               </div>
+
+              {team?.members && team.members.length > 0 ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                  {team.members.map((m: any) => (
+                    <div key={m.id} className="p-4 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-2 relative group hover:border-indigo-200 transition-colors">
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <span className="font-bold text-slate-900 text-sm block">{m.user?.name || 'Student Member'}</span>
+                          <span className="text-indigo-600 font-semibold block">{m.role}</span>
+                          <span className="text-slate-500 block">{m.discipline} {m.department ? `(${m.department})` : ''}</span>
+                        </div>
+                        {['UNIVERSITY', 'FACULTY', 'ADMIN'].includes(role) && (
+                          <button
+                            onClick={() => handleRemoveMember(m.id)}
+                            className="text-slate-400 hover:text-rose-600 p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity"
+                            title="Remove Member"
+                          >
+                            ✕
+                          </button>
+                        )}
+                      </div>
+                      {m.responsibilities && (
+                        <p className="text-[11px] text-slate-500 border-t border-slate-100 pt-1.5">
+                          {m.responsibilities}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="p-8 bg-slate-50 rounded-xl border border-dashed border-slate-300 text-center space-y-3">
+                  <Users className="w-8 h-8 text-slate-400 mx-auto" />
+                  <p className="text-xs font-semibold text-slate-700">No Team Members Added Yet</p>
+                  <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                    Assemble a multidisciplinary student team by selecting registered students from engineering, science, and public policy disciplines.
+                  </p>
+                  {['UNIVERSITY', 'FACULTY', 'ADMIN'].includes(role) && (
+                    <button
+                      onClick={openTeamModal}
+                      className="btn-primary text-xs"
+                    >
+                      Select Students & Assemble Team
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Task Board */}
@@ -900,38 +1406,166 @@ export default function ProblemCaseRoomPage() {
         {/* TAB 6: SOLUTION PROPOSAL */}
         {activeTab === 'solution' && (
           <div className="card p-6 space-y-6">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
               <div>
                 <h3 className="text-base font-bold text-slate-900">Versioned Technical Solution Proposal</h3>
-                <p className="text-xs text-slate-500">Version: <strong>v{solution?.version || 1}</strong> • Status: <strong>{solution?.status || 'DRAFT'}</strong></p>
+                <p className="text-xs text-slate-500">
+                  Version: <strong>v{solution?.version || 1}</strong> • Status: <strong className="text-indigo-600">{solution?.status || 'DRAFT'}</strong>
+                </p>
               </div>
-              <span className="px-2.5 py-1 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded font-semibold text-xs">
-                Faculty Certified: {solution?.facultyApproved ? '✓ Yes' : 'Pending'}
-              </span>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <span className={`px-2.5 py-1 rounded font-semibold text-xs border ${
+                  solution?.facultyApproved
+                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                    : solution?.status === 'FACULTY_REVIEW'
+                    ? 'bg-amber-50 text-amber-700 border-amber-200 animate-pulse'
+                    : 'bg-slate-100 text-slate-600 border-slate-200'
+                }`}>
+                  {solution?.facultyApproved
+                    ? `✓ Certified by ${project?.facultyAssignment?.faculty?.name || 'Faculty Leader'}`
+                    : solution?.status === 'FACULTY_REVIEW'
+                    ? '⏳ In Faculty Review'
+                    : 'Pending Faculty Sign-off'}
+                </span>
+
+                {['UNIVERSITY', 'FACULTY', 'ADMIN'].includes(role) && (
+                  <button
+                    onClick={openSolutionModal}
+                    className="btn bg-slate-900 hover:bg-black text-white text-xs px-3 py-1.5 flex items-center gap-1 shadow-sm font-semibold"
+                  >
+                    <FileText className="w-3.5 h-3.5" />
+                    <span>{solution ? 'Edit Solution' : 'Draft Solution'}</span>
+                  </button>
+                )}
+
+                {role === 'UNIVERSITY' && solution && ['DRAFT', 'CHANGES_REQUESTED'].includes(solution.status) && project?.facultyAssignment && (
+                  <button
+                    onClick={handleSubmitToFaculty}
+                    disabled={actionLoading}
+                    className="btn bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 text-xs px-3 py-1.5 flex items-center gap-1 shadow-sm font-semibold"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>Submit to Faculty</span>
+                  </button>
+                )}
+
+                {['FACULTY', 'ADMIN'].includes(role) && solution && (!solution.facultyApproved || solution.status === 'FACULTY_REVIEW') && (
+                  <button
+                    onClick={() => setShowSignOffModal(true)}
+                    disabled={actionLoading}
+                    className="btn bg-violet-600 hover:bg-violet-700 text-white text-xs px-3 py-1.5 flex items-center gap-1 shadow-sm font-semibold"
+                  >
+                    <Award className="w-3.5 h-3.5" />
+                    <span>Certify Solution</span>
+                  </button>
+                )}
+
+                {solution && ['DRAFT', 'FACULTY_REVIEW', 'CHANGES_REQUESTED'].includes(solution.status) && ['UNIVERSITY', 'FACULTY', 'ADMIN'].includes(role) && (
+                  <button
+                    onClick={handleSubmitSolutionToGov}
+                    disabled={actionLoading}
+                    className="btn bg-emerald-600 hover:bg-emerald-700 text-white text-xs px-3 py-1.5 flex items-center gap-1 shadow-sm font-semibold"
+                  >
+                    <ArrowRight className="w-3.5 h-3.5" />
+                    <span>Submit to Government</span>
+                  </button>
+                )}
+              </div>
             </div>
 
-            <div className="space-y-4 text-xs">
-              <div className="p-4 bg-slate-50 rounded-xl space-y-1">
-                <span className="font-bold text-slate-900 block">Proposed Engineering Intervention:</span>
-                <p className="text-slate-700 leading-relaxed">{solution?.proposedSolution || 'Automated Silt Trap and Dual-Flow Retention Tank with Solar-Powered IoT Water Level Monitoring.'}</p>
+            {solution?.facultyRemarks && (
+              <div className="p-4 bg-violet-50/70 border border-violet-100 rounded-xl text-xs space-y-1">
+                <span className="font-bold text-violet-900 block flex items-center gap-1">
+                  <Award className="w-3.5 h-3.5 text-violet-600" />
+                  Faculty Mentor Endorsement Remarks:
+                </span>
+                <p className="text-violet-800 italic">"{solution.facultyRemarks}"</p>
+                {solution.facultyApprovedAt && (
+                  <span className="text-[11px] text-violet-500 block">
+                    Certified on {format(new Date(solution.facultyApprovedAt), 'dd MMM yyyy, hh:mm a')}
+                  </span>
+                )}
               </div>
+            )}
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {solution ? (
+              <div className="space-y-4 text-xs">
                 <div className="p-4 bg-slate-50 rounded-xl space-y-1">
-                  <span className="font-bold text-slate-900 block">Root Cause Analysis:</span>
-                  <p className="text-slate-600">{solution?.rootCause || 'Inadequate gradient and accumulated plastic debris at culvert inlet.'}</p>
+                  <span className="font-bold text-slate-900 block">Proposed Engineering Intervention:</span>
+                  <p className="text-slate-700 leading-relaxed text-sm font-medium">{solution.proposedSolution}</p>
                 </div>
-                <div className="p-4 bg-slate-50 rounded-xl space-y-1">
-                  <span className="font-bold text-slate-900 block">Estimated Cost:</span>
-                  <p className="text-slate-600 font-bold text-indigo-700 text-sm">₹{solution?.estimatedCost ? solution.estimatedCost.toLocaleString() : '85,000'}</p>
-                </div>
-              </div>
 
-              <div className="p-4 bg-slate-50 rounded-xl space-y-1">
-                <span className="font-bold text-slate-900 block">Long-Term Sustainability & Maintenance:</span>
-                <p className="text-slate-600">{solution?.sustainabilityPlan || 'Weekly automated cleaning protocol operated by municipal sanitation team with sensor alerts sent to ward junior engineer.'}</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="p-4 bg-slate-50 rounded-xl space-y-1">
+                    <span className="font-bold text-slate-900 block">Root Cause Analysis:</span>
+                    <p className="text-slate-600 leading-relaxed">{solution.rootCause}</p>
+                  </div>
+                  <div className="p-4 bg-slate-50 rounded-xl space-y-1">
+                    <span className="font-bold text-slate-900 block">Technical Approach & Methodology:</span>
+                    <p className="text-slate-600 leading-relaxed">{solution.technicalApproach}</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div className="p-4 bg-slate-50 rounded-xl space-y-1">
+                    <span className="font-bold text-slate-900 block">Estimated Budget:</span>
+                    <p className="text-indigo-700 font-bold text-sm">
+                      {solution.estimatedCost ? `₹${solution.estimatedCost.toLocaleString('en-IN')}` : 'To be estimated'}
+                    </p>
+                  </div>
+                  <div className="p-4 bg-slate-50 rounded-xl space-y-1">
+                    <span className="font-bold text-slate-900 block">Expected Deployment Timeline:</span>
+                    <p className="text-slate-700 font-medium">{solution.timeline || '6-8 weeks'}</p>
+                  </div>
+                  <div className="p-4 bg-slate-50 rounded-xl space-y-1">
+                    <span className="font-bold text-slate-900 block">Prototype / Blueprint URL:</span>
+                    {solution.prototypeUrl ? (
+                      <a href={solution.prototypeUrl} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline font-medium truncate block">
+                        {solution.prototypeUrl}
+                      </a>
+                    ) : (
+                      <span className="text-slate-400">None attached</span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="p-4 bg-slate-50 rounded-xl space-y-1">
+                  <span className="font-bold text-slate-900 block">Expected Community Impact:</span>
+                  <p className="text-slate-700 leading-relaxed">{solution.expectedImpact}</p>
+                </div>
+
+                {solution.implementationPlan && (
+                  <div className="p-4 bg-slate-50 rounded-xl space-y-1">
+                    <span className="font-bold text-slate-900 block">Phased Pilot Implementation Plan:</span>
+                    <p className="text-slate-600 leading-relaxed">{solution.implementationPlan}</p>
+                  </div>
+                )}
+
+                {solution.sustainabilityPlan && (
+                  <div className="p-4 bg-slate-50 rounded-xl space-y-1">
+                    <span className="font-bold text-slate-900 block">Long-Term Sustainability & Maintenance:</span>
+                    <p className="text-slate-600 leading-relaxed">{solution.sustainabilityPlan}</p>
+                  </div>
+                )}
               </div>
-            </div>
+            ) : (
+              <div className="p-12 text-center bg-slate-50 rounded-xl border border-dashed border-slate-300 space-y-3">
+                <FileText className="w-10 h-10 text-slate-300 mx-auto" />
+                <h4 className="text-sm font-bold text-slate-700">No Solution Proposal Submitted Yet</h4>
+                <p className="text-xs text-slate-500 max-w-md mx-auto">
+                  The research team can draft a comprehensive engineering solution proposal including root-cause analysis, methodology, cost estimation, and sustainability plan.
+                </p>
+                {['UNIVERSITY', 'FACULTY', 'ADMIN'].includes(role) && (
+                  <button
+                    onClick={openSolutionModal}
+                    className="btn-primary text-xs"
+                  >
+                    Draft Technical Solution Proposal
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -1354,6 +1988,404 @@ export default function ProblemCaseRoomPage() {
                   </button>
                   <button type="submit" disabled={actionLoading} className="btn-primary">
                     Submit Feedback
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* MODAL: Assign Faculty Leader */}
+        {showAssignFacultyModal && (
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-2xl p-6 max-w-md w-full space-y-4 shadow-xl">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">Assign Faculty Mentor</h3>
+                  <p className="text-xs text-slate-500">Designate an academic research lead to guide this civic project.</p>
+                </div>
+                <button onClick={() => setShowAssignFacultyModal(false)} className="text-slate-400 hover:text-slate-600">✕</button>
+              </div>
+
+              {loadingFaculty ? (
+                <div className="py-8 text-center text-xs text-slate-400">Loading verified faculty directory...</div>
+              ) : facultyList.length === 0 ? (
+                <div className="py-6 text-center text-xs text-slate-500">No registered faculty members found.</div>
+              ) : (
+                <form onSubmit={handleAssignFaculty} className="space-y-4 text-xs">
+                  <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+                    {facultyList.map((f: any) => (
+                      <label
+                        key={f.id}
+                        className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-all ${
+                          selectedFacultyId === f.id
+                            ? 'border-violet-600 bg-violet-50/70 ring-1 ring-violet-500'
+                            : 'border-slate-200 hover:bg-slate-50'
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="facultySelect"
+                          value={f.id}
+                          checked={selectedFacultyId === f.id}
+                          onChange={() => setSelectedFacultyId(f.id)}
+                          className="mt-1"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <p className="font-bold text-slate-900 text-sm">{f.name}</p>
+                          <p className="text-violet-700 font-medium text-xs">
+                            {f.faculty?.designation || 'Faculty Mentor'} • {f.faculty?.department || 'Department'}
+                          </p>
+                          <p className="text-slate-500 text-[11px] truncate">{f.faculty?.university || f.email}</p>
+                          {f.faculty?.expertise && (
+                            <p className="text-[11px] text-slate-400 mt-1 line-clamp-1">Expertise: {f.faculty.expertise}</p>
+                          )}
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+
+                  <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+                    <button type="button" onClick={() => setShowAssignFacultyModal(false)} className="btn-secondary">
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={!selectedFacultyId || actionLoading}
+                      className="btn bg-violet-600 hover:bg-violet-700 text-white"
+                    >
+                      {actionLoading ? 'Assigning...' : 'Assign Faculty Leader'}
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* MODAL: Assemble Team / Select Students & Add Members */}
+        {showTeamModal && (
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-2xl p-6 max-w-lg w-full space-y-4 shadow-xl">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">Multidisciplinary Team & Student Selection</h3>
+                  <p className="text-xs text-slate-500">Form a team or add student researchers across disciplines.</p>
+                </div>
+                <button onClick={() => setShowTeamModal(false)} className="text-slate-400 hover:text-slate-600">✕</button>
+              </div>
+
+              <form onSubmit={handleSaveTeamOrMember} className="space-y-3 text-xs">
+                {!team && (
+                  <>
+                    <div>
+                      <label className="label">Team Name</label>
+                      <input
+                        type="text"
+                        className="input"
+                        value={teamForm.teamName}
+                        onChange={(e) => setTeamForm({ ...teamForm, teamName: e.target.value })}
+                        placeholder="e.g. Project AquaGuard Multidisciplinary Team"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="label">Team Mission / Description</label>
+                      <input
+                        type="text"
+                        className="input"
+                        value={teamForm.teamDescription}
+                        onChange={(e) => setTeamForm({ ...teamForm, teamDescription: e.target.value })}
+                        placeholder="e.g. Combining Civil Engineering, IoT Sensors, and Software"
+                      />
+                    </div>
+                  </>
+                )}
+
+                <div className="pt-2 border-t border-slate-100">
+                  <label className="label font-bold text-slate-800">Select Registered Student / Candidate</label>
+                  {loadingCandidates ? (
+                    <div className="text-slate-400 text-xs py-2">Loading candidates...</div>
+                  ) : (
+                    <select
+                      className="select"
+                      value={teamForm.userId}
+                      onChange={(e) => setTeamForm({ ...teamForm, userId: e.target.value })}
+                    >
+                      <option value="">-- Choose Candidate from Platform Directory --</option>
+                      {candidatesList.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name} ({c.email}) — {c.role} {c.faculty?.department ? `• ${c.faculty.department}` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    Select a student or platform member to assign responsibilities.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="label">Role</label>
+                    <select
+                      className="select"
+                      value={teamForm.role}
+                      onChange={(e) => setTeamForm({ ...teamForm, role: e.target.value })}
+                    >
+                      <option value="Student Team Lead">Student Team Lead</option>
+                      <option value="Student Researcher">Student Researcher</option>
+                      <option value="Hardware / IoT Engineer">Hardware / IoT Engineer</option>
+                      <option value="Software Developer">Software Developer</option>
+                      <option value="Field Surveyor">Field Surveyor</option>
+                      <option value="Hydraulics Specialist">Hydraulics Specialist</option>
+                      <option value="Environmental Analyst">Environmental Analyst</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="label">Discipline / Branch</label>
+                    <input
+                      type="text"
+                      className="input"
+                      value={teamForm.discipline}
+                      onChange={(e) => setTeamForm({ ...teamForm, discipline: e.target.value })}
+                      placeholder="e.g. Computer Science & IoT, Civil Engg"
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="label">Department / College (Optional)</label>
+                  <input
+                    type="text"
+                    className="input"
+                    value={teamForm.department}
+                    onChange={(e) => setTeamForm({ ...teamForm, department: e.target.value })}
+                    placeholder="e.g. Dept of Computer Science"
+                  />
+                </div>
+
+                <div>
+                  <label className="label">Specific Deliverables / Responsibilities</label>
+                  <textarea
+                    className="textarea"
+                    rows={2}
+                    value={teamForm.responsibilities}
+                    onChange={(e) => setTeamForm({ ...teamForm, responsibilities: e.target.value })}
+                    placeholder="e.g. Ultrasonic sensor firmware and cloud data transmission"
+                  />
+                </div>
+
+                <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+                  <button type="button" onClick={() => setShowTeamModal(false)} className="btn-secondary">
+                    Cancel
+                  </button>
+                  <button type="submit" disabled={actionLoading} className="btn-primary">
+                    {actionLoading ? 'Saving...' : teamForm.userId ? 'Add Member to Team' : 'Assemble Team'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* MODAL: Technical Solution Proposal Editor */}
+        {showSolutionModal && (
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
+            <div className="bg-white rounded-2xl p-6 max-w-2xl w-full space-y-4 shadow-xl my-8">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">Technical Solution Proposal</h3>
+                  <p className="text-xs text-slate-500">Author, draft, or refine the multidisciplinary civic solution.</p>
+                </div>
+                <button onClick={() => setShowSolutionModal(false)} className="text-slate-400 hover:text-slate-600">✕</button>
+              </div>
+
+              <form onSubmit={handleSaveSolution} className="space-y-4 text-xs">
+                <div>
+                  <label className="label font-bold">Proposed Engineering Intervention (Title & Summary)</label>
+                  <input
+                    type="text"
+                    className="input font-semibold"
+                    value={solutionForm.proposedSolution}
+                    onChange={(e) => setSolutionForm({ ...solutionForm, proposedSolution: e.target.value })}
+                    placeholder="e.g. Automated Silt Trap with Real-Time LoRaWAN Water Level Sensor"
+                    required
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="label">Root Cause Analysis</label>
+                    <textarea
+                      className="textarea"
+                      rows={3}
+                      value={solutionForm.rootCause}
+                      onChange={(e) => setSolutionForm({ ...solutionForm, rootCause: e.target.value })}
+                      placeholder="Underlying technical cause of the civic issue..."
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="label">Technical Approach & Methodology</label>
+                    <textarea
+                      className="textarea"
+                      rows={3}
+                      value={solutionForm.technicalApproach}
+                      onChange={(e) => setSolutionForm({ ...solutionForm, technicalApproach: e.target.value })}
+                      placeholder="Hardware, software, structural calculations, IoT stack..."
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="label">Estimated Budget (₹ INR)</label>
+                    <input
+                      type="number"
+                      className="input"
+                      value={solutionForm.estimatedCost}
+                      onChange={(e) => setSolutionForm({ ...solutionForm, estimatedCost: e.target.value })}
+                      placeholder="e.g. 75000"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="label">Timeline</label>
+                    <input
+                      type="text"
+                      className="input"
+                      value={solutionForm.timeline}
+                      onChange={(e) => setSolutionForm({ ...solutionForm, timeline: e.target.value })}
+                      placeholder="e.g. 6 weeks"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="label">Prototype / Blueprint URL</label>
+                    <input
+                      type="url"
+                      className="input"
+                      value={solutionForm.prototypeUrl}
+                      onChange={(e) => setSolutionForm({ ...solutionForm, prototypeUrl: e.target.value })}
+                      placeholder="https://github.com/... or Figma/Drive"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="label">Expected Quantifiable Community Impact</label>
+                  <textarea
+                    className="textarea"
+                    rows={2}
+                    value={solutionForm.expectedImpact}
+                    onChange={(e) => setSolutionForm({ ...solutionForm, expectedImpact: e.target.value })}
+                    placeholder="e.g. Prevents school campus flooding, safeguarding 1,200 students during heavy monsoon."
+                    required
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="label">Phased Pilot Implementation Plan</label>
+                    <textarea
+                      className="textarea"
+                      rows={2}
+                      value={solutionForm.implementationPlan}
+                      onChange={(e) => setSolutionForm({ ...solutionForm, implementationPlan: e.target.value })}
+                      placeholder="Phase 1: Sensor fabrication; Phase 2: On-site culvert fitting..."
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="label">Long-Term Maintenance & Sustainability</label>
+                    <textarea
+                      className="textarea"
+                      rows={2}
+                      value={solutionForm.sustainabilityPlan}
+                      onChange={(e) => setSolutionForm({ ...solutionForm, sustainabilityPlan: e.target.value })}
+                      placeholder="Handover protocol to municipal engineering division..."
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-slate-100">
+                  <button type="button" onClick={() => setShowSolutionModal(false)} className="btn-secondary">
+                    Cancel
+                  </button>
+                  <div className="flex items-center gap-2">
+                    <button type="submit" disabled={actionLoading} className="btn bg-slate-800 hover:bg-slate-900 text-white">
+                      {actionLoading ? 'Saving...' : 'Save Draft'}
+                    </button>
+                    {role === 'UNIVERSITY' && project?.facultyAssignment && (
+                      <button
+                        type="button"
+                        onClick={async (e) => {
+                          await handleSaveSolution(e)
+                          await handleSubmitToFaculty()
+                        }}
+                        disabled={actionLoading}
+                        className="btn bg-violet-600 hover:bg-violet-700 text-white"
+                      >
+                        Save & Submit to Faculty
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={async (e) => {
+                        await handleSaveSolution(e)
+                        await handleSubmitSolutionToGov()
+                      }}
+                      disabled={actionLoading}
+                      className="btn bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
+                    >
+                      Save & Submit to Govt
+                    </button>
+                  </div>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* MODAL: Faculty Certification Sign-Off */}
+        {showSignOffModal && (
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-2xl p-6 max-w-md w-full space-y-4 shadow-xl">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">Faculty Leader Certification</h3>
+                  <p className="text-xs text-slate-500">Certify this technical proposal before government validation.</p>
+                </div>
+                <button onClick={() => setShowSignOffModal(false)} className="text-slate-400 hover:text-slate-600">✕</button>
+              </div>
+
+              <form onSubmit={handleFacultySignOff} className="space-y-4 text-xs">
+                <div>
+                  <label className="label">Endorsement Remarks & Recommendations</label>
+                  <textarea
+                    className="textarea"
+                    rows={4}
+                    value={facultyRemarks}
+                    onChange={(e) => setFacultyRemarks(e.target.value)}
+                    placeholder="e.g. Solution methodology reviewed. The IoT sensor specs and hydraulic calculations meet municipal requirements."
+                    required
+                  />
+                </div>
+
+                <div className="p-3 bg-violet-50 rounded-lg text-violet-800 text-[11px] leading-relaxed">
+                  ✓ By certifying, you confirm this proposal is technically viable, safe, and ready for official government rubric scoring.
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+                  <button type="button" onClick={() => setShowSignOffModal(false)} className="btn-secondary">
+                    Cancel
+                  </button>
+                  <button type="submit" disabled={actionLoading} className="btn bg-violet-600 hover:bg-violet-700 text-white">
+                    {actionLoading ? 'Certifying...' : 'Certify Solution Proposal'}
                   </button>
                 </div>
               </form>

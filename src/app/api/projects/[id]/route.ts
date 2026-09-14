@@ -116,9 +116,60 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     return Response.json({ success: true, status: 'ACCEPTED' })
   }
 
+  // 1.5 Assign Faculty Leader
+  if (action === 'ASSIGN_FACULTY') {
+    if (!['UNIVERSITY', 'FACULTY', 'ADMIN'].includes(session.user.role)) {
+      return Response.json({ error: 'Unauthorized to assign faculty' }, { status: 403 })
+    }
+    const { facultyId } = data
+    if (!facultyId) {
+      return Response.json({ error: 'Faculty ID is required' }, { status: 400 })
+    }
+
+    const facultyUser = await prisma.user.findUnique({
+      where: { id: facultyId },
+      include: { faculty: true },
+    })
+    if (!facultyUser) {
+      return Response.json({ error: 'Faculty user not found' }, { status: 404 })
+    }
+
+    const assignment = await prisma.facultyLeaderAssignment.upsert({
+      where: { projectId: id },
+      update: { facultyId, assignedAt: new Date() },
+      create: { projectId: id, facultyId },
+    })
+
+    await createNotification({
+      userId: facultyId,
+      title: `Assigned as Faculty Mentor: ${project.problem.title}`,
+      message: `You have been assigned as Faculty Leader for problem ${project.problem.referenceId}. You can now guide students and review technical solutions.`,
+      type: 'ACTION',
+      problemId: project.problemId,
+      link: `/faculty/projects/${id}`,
+    })
+
+    await prisma.auditLog.create({
+      data: {
+        problemId: project.problemId,
+        projectId: id,
+        userId: session.user.id,
+        action: 'Faculty Leader Assigned',
+        remarks: `Prof. ${facultyUser.name} (${facultyUser.faculty?.department || 'Faculty'}) assigned as project lead.`,
+      },
+    })
+
+    return Response.json({ success: true, assignment })
+  }
+
   // 2. Create / Update Team
   if (action === 'CREATE_TEAM') {
+    if (!['UNIVERSITY', 'FACULTY', 'ADMIN'].includes(session.user.role)) {
+      return Response.json({ error: 'Unauthorized' }, { status: 403 })
+    }
+
     const { teamName, teamDescription, members, facultyId } = data
+    const effectiveFacultyId = facultyId || (session.user.role === 'FACULTY' ? session.user.id : undefined)
 
     const existingTeam = await prisma.universityTeam.findUnique({ where: { projectId: id } })
     let team
@@ -136,26 +187,91 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     if (members && Array.isArray(members)) {
       for (const m of members) {
         if (m.userId) {
-          await prisma.teamMember.upsert({
-            where: { id: m.id || 'new-member' },
-            update: { role: m.role, discipline: m.discipline, responsibilities: m.responsibilities },
-            create: { teamId: team.id, userId: m.userId, role: m.role, discipline: m.discipline, responsibilities: m.responsibilities },
-          }).catch(() => {})
+          if (m.id) {
+            await prisma.teamMember.update({
+              where: { id: m.id },
+              data: { role: m.role || 'Member', discipline: m.discipline || 'Engineering', responsibilities: m.responsibilities },
+            }).catch(() => {})
+          } else {
+            await prisma.teamMember.create({
+              data: { teamId: team.id, userId: m.userId, role: m.role || 'Member', discipline: m.discipline || 'Engineering', responsibilities: m.responsibilities },
+            }).catch(() => {})
+          }
         }
       }
     }
 
-    if (facultyId) {
+    if (effectiveFacultyId) {
       await prisma.facultyLeaderAssignment.upsert({
         where: { projectId: id },
-        update: { facultyId },
-        create: { projectId: id, facultyId },
+        update: { facultyId: effectiveFacultyId },
+        create: { projectId: id, facultyId: effectiveFacultyId },
       })
     }
 
     await prisma.universityProject.update({ where: { id }, data: { status: 'TEAM_FORMATION' } })
     await transitionProblemStatus(project.problemId, 'TEAM_FORMATION', session.user.id, 'Team Formation Initialized', 'Multidisciplinary team assembled.')
 
+    return Response.json({ success: true, team })
+  }
+
+  // 2.5 Add Single Team Member
+  if (action === 'ADD_TEAM_MEMBER') {
+    if (!['UNIVERSITY', 'FACULTY', 'ADMIN'].includes(session.user.role)) {
+      return Response.json({ error: 'Unauthorized' }, { status: 403 })
+    }
+
+    let team = await prisma.universityTeam.findUnique({ where: { projectId: id } })
+    if (!team) {
+      team = await prisma.universityTeam.create({
+        data: {
+          projectId: id,
+          name: `${project.title.split(':')[0]} Innovation Team`,
+          description: 'Multidisciplinary student and researcher team',
+        },
+      })
+    }
+
+    const { userId, role: memberRole, discipline, department, responsibilities } = data
+    if (!userId) {
+      return Response.json({ error: 'User ID is required for team member' }, { status: 400 })
+    }
+
+    const member = await prisma.teamMember.create({
+      data: {
+        teamId: team.id,
+        userId,
+        role: memberRole || 'Researcher',
+        discipline: discipline || 'Engineering',
+        department: department || null,
+        responsibilities: responsibilities || null,
+      },
+      include: {
+        user: { select: { id: true, name: true, email: true } },
+      },
+    })
+
+    await createNotification({
+      userId,
+      title: `Added to Team: ${project.problem.title}`,
+      message: `You were added to the multidisciplinary project team as ${member.role} (${member.discipline}).`,
+      type: 'INFO',
+      problemId: project.problemId,
+      link: `/problems/${project.problemId}`,
+    })
+
+    return Response.json({ success: true, member })
+  }
+
+  // 2.6 Remove Team Member
+  if (action === 'REMOVE_TEAM_MEMBER') {
+    if (!['UNIVERSITY', 'FACULTY', 'ADMIN'].includes(session.user.role)) {
+      return Response.json({ error: 'Unauthorized' }, { status: 403 })
+    }
+    const { memberId } = data
+    if (!memberId) return Response.json({ error: 'Member ID required' }, { status: 400 })
+
+    await prisma.teamMember.delete({ where: { id: memberId } })
     return Response.json({ success: true })
   }
 
@@ -234,6 +350,46 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     return Response.json({ success: true, solution: sol })
   }
 
+  // 4.5 Submit Solution to Assigned Faculty for Review
+  if (action === 'SUBMIT_TO_FACULTY') {
+    const existingSolution = await prisma.solution.findUnique({ where: { projectId: id } })
+    if (!existingSolution) {
+      return Response.json({ error: 'Please save a solution draft first' }, { status: 400 })
+    }
+
+    await prisma.solution.update({
+      where: { projectId: id },
+      data: { status: 'FACULTY_REVIEW' },
+    })
+
+    const facultyAssignment = await prisma.facultyLeaderAssignment.findUnique({
+      where: { projectId: id },
+    })
+
+    if (facultyAssignment) {
+      await createNotification({
+        userId: facultyAssignment.facultyId,
+        title: `Solution Proposal Ready for Review: ${project.problem.title}`,
+        message: `A technical solution proposal for ${project.problem.referenceId} has been submitted for your academic review and certification.`,
+        type: 'ACTION',
+        problemId: project.problemId,
+        link: `/faculty/projects/${id}`,
+      })
+    }
+
+    await prisma.auditLog.create({
+      data: {
+        problemId: project.problemId,
+        projectId: id,
+        userId: session.user.id,
+        action: 'Solution Submitted to Faculty',
+        remarks: 'Solution proposal forwarded to Faculty Mentor for review and certification.',
+      },
+    })
+
+    return Response.json({ success: true, message: 'Proposal submitted to assigned faculty leader.' })
+  }
+
   // 5. Faculty Sign-off on Proposal
   if (action === 'FACULTY_SIGN_OFF') {
     if (!['FACULTY', 'UNIVERSITY', 'ADMIN'].includes(session.user.role)) {
@@ -250,11 +406,25 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
       },
     })
 
+    await prisma.auditLog.create({
+      data: {
+        problemId: project.problemId,
+        projectId: id,
+        userId: session.user.id,
+        action: 'Faculty Solution Certification',
+        remarks: `Solution certified by ${session.user.name}: "${data.facultyRemarks || 'Approved for Government Validation'}"`,
+      },
+    })
+
     return Response.json({ success: true, message: 'Proposal certified by Faculty Leader.' })
   }
 
   // 6. Submit Proposal to Government for Rubric Evaluation
   if (action === 'SUBMIT_SOLUTION') {
+    if (!['UNIVERSITY', 'FACULTY', 'ADMIN'].includes(session.user.role)) {
+      return Response.json({ error: 'Unauthorized to submit solution to government' }, { status: 403 })
+    }
+
     await prisma.universityProject.update({ where: { id }, data: { status: 'SOLUTION_SUBMITTED' } })
     await prisma.solution.update({
       where: { projectId: id },
@@ -262,6 +432,16 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     })
     await transitionProblemStatus(project.problemId, 'SOLUTION_SUBMITTED', session.user.id, 'Solution Proposal Submitted for Government Validation')
     await notifyRole('GOVERNMENT', 'Solution Ready for Validation', `Solution proposal for "${project.problem.title}" is ready for rubric evaluation.`, 'ACTION', `/problems/${project.problemId}`)
+
+    await prisma.auditLog.create({
+      data: {
+        problemId: project.problemId,
+        projectId: id,
+        userId: session.user.id,
+        action: 'Solution Submitted to Government',
+        remarks: 'Final solution proposal submitted for official 6-criteria rubric validation.',
+      },
+    })
 
     return Response.json({ success: true })
   }

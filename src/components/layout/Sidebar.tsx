@@ -37,6 +37,7 @@ function getNavItems(role: string) {
       return [
         { href: '/faculty/dashboard', label: 'Dashboard', icon: LayoutDashboard },
         { href: '/faculty/projects', label: 'My Projects', icon: Briefcase },
+        { href: '/faculty/teams', label: 'Teams', icon: Users },
       ]
     case 'INDUSTRY':
       return [
